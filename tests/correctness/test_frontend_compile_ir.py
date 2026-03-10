@@ -1,0 +1,97 @@
+import unittest
+from dataclasses import dataclass
+
+from pyZKP import build_witness, check_r1cs, compile_circuit
+from pyZKP.common.ir.core import LinExpr, VarRef, Visibility
+from pyZKP.frontend.circuit.schema import public, secret
+
+
+BN254_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+
+
+@dataclass
+class CubicCircuit:
+    x: object = secret("x")
+    y: object = public("y")
+
+    def define(self, api):
+        x3 = api.Mul(self.x, self.x, self.x)
+        api.AssertIsEqual(self.y, api.Add(x3, self.x, 5))
+
+
+@dataclass
+class BoolSelectCircuit:
+    a: object = public("a")
+    b: object = public("b")
+    flag: object = secret("flag")
+    out: object = public("out")
+
+    def define(self, api):
+        z = api.IsZero(api.Sub(self.a, self.b))
+        sel = api.Select(self.flag, self.a, self.b)
+        api.AssertIsEqual(self.out, api.Add(sel, z))
+
+
+@dataclass
+class DuplicateNameCircuit:
+    a: object = public("dup")
+    b: object = secret("dup")
+
+    def define(self, api):
+        api.AssertIsEqual(self.a, self.b)
+
+
+class TestFrontendCompileIR(unittest.TestCase):
+    def test_public_secret_input_order(self):
+        ir = compile_circuit(CubicCircuit(), BN254_MODULUS)
+        print(ir)
+        self.assertEqual([i.name for i in ir.inputs], ["y", "x"])
+        self.assertEqual([i.visibility for i in ir.inputs], [Visibility.PUBLIC, Visibility.SECRET])
+        self.assertEqual(ir.vars[0].name, "y")
+        self.assertEqual(ir.vars[1].name, "x")
+
+    def test_mul_introduces_internal_vars_and_r1cs_constraints(self):
+        ir = compile_circuit(CubicCircuit(), BN254_MODULUS)
+        internal = [v for v in ir.vars if v.visibility == Visibility.INTERNAL]
+        self.assertGreaterEqual(len(internal), 2)
+        self.assertGreaterEqual(len(ir.constraints), 3)
+        for c in ir.constraints:
+            self.assertIsInstance(c.a, LinExpr)
+            self.assertIsInstance(c.b, LinExpr)
+            self.assertIsInstance(c.c, LinExpr)
+
+    def test_iszero_select_compiles(self):
+        ir = compile_circuit(BoolSelectCircuit(), BN254_MODULUS)
+        self.assertGreaterEqual(len(ir.constraints), 1)
+        self.assertGreaterEqual(len(ir.vars), 1)
+
+    def test_schema_rejects_duplicate_input_names(self):
+        with self.assertRaises(ValueError):
+            compile_circuit(DuplicateNameCircuit(), BN254_MODULUS)
+
+    def test_all_varrefs_in_constraints_exist(self):
+        ir = compile_circuit(BoolSelectCircuit(), BN254_MODULUS)
+        max_id = max(v.id for v in ir.vars)
+
+        def check_lin(le: LinExpr):
+            for vid, _ in le.terms:
+                self.assertLessEqual(vid, max_id)
+
+        for c in ir.constraints:
+            check_lin(c.a)
+            check_lin(c.b)
+            check_lin(c.c)
+
+    def test_build_witness_and_check_constraints(self):
+        ir = compile_circuit(BoolSelectCircuit(), BN254_MODULUS)
+        wit = build_witness(ir, {"a": 7, "b": 7, "flag": 1, "out": 8})
+        print(f"wit: {wit}")
+        check_r1cs(ir, wit)
+
+        wit2 = build_witness(ir, {"a": 7, "b": 9, "flag": 0, "out": 9})
+        print(f"wit2: {wit2}")
+        check_r1cs(ir, wit2)
+
+
+if __name__ == "__main__":
+    unittest.main()
