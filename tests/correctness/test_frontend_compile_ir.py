@@ -40,6 +40,32 @@ class DuplicateNameCircuit:
     def define(self, api):
         api.AssertIsEqual(self.a, self.b)
 
+@dataclass
+class ToBinaryCircuit:
+    x: object = secret("x")
+    out: object = public("out")
+
+    def define(self, api):
+        bits = api.ToBinary(self.x, 8)
+        recomposed = api.FromBinary(bits)
+        api.AssertIsEqual(self.out, api.Add(recomposed, 0))
+        api.AssertIsEqual(self.x, recomposed)
+
+
+def double_hint(x: int) -> int:
+    return x * 2
+
+
+@dataclass
+class UserHintCircuit:
+    x: object = public("x")
+    out: object = public("out")
+
+    def define(self, api):
+        y = api.Hint(double_hint, [self.x], n_outputs=1, names=["double"])
+        api.AssertIsEqual(self.out, y)
+        api.AssertIsEqual(y, api.Mul(2, self.x))
+
 
 class TestFrontendCompileIR(unittest.TestCase):
     def test_public_secret_input_order(self):
@@ -91,6 +117,16 @@ class TestFrontendCompileIR(unittest.TestCase):
         wit2 = build_witness(ir, {"a": 7, "b": 9, "flag": 0, "out": 9})
         print(f"wit2: {wit2}")
         check_r1cs(ir, wit2)
+
+    def test_to_binary_hint_and_witness(self):
+        ir = compile_circuit(ToBinaryCircuit(), BN254_MODULUS)
+        wit = build_witness(ir, {"x": 13, "out": 13})
+        check_r1cs(ir, wit)
+
+    def test_user_hint_registration_and_witness(self):
+        ir = compile_circuit(UserHintCircuit(), BN254_MODULUS)
+        wit = build_witness(ir, {"x": 9, "out": 18})
+        check_r1cs(ir, wit)
 
 
 if __name__ == "__main__":

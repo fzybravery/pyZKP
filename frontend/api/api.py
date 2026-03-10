@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Sequence
 
 from pyZKP.common.ir.core import (
     Expr,
@@ -17,6 +17,7 @@ from pyZKP.common.ir.core import (
     lin_neg,
     lin_sub,
 )
+from pyZKP.frontend.api.hints import GLOBAL_HINTS, HintFn
 
 
 Var = Expr
@@ -85,6 +86,18 @@ class API:
     def Constant(self, v: int) -> Expr:
         return self._b.field.normalize(v)
 
+    def Hint(self, fn_or_name: str | HintFn, inputs: Sequence[Var], n_outputs: int = 1, names: List[str] | None = None) -> Var | List[Var]:
+        if isinstance(fn_or_name, str):
+            op = fn_or_name
+        else:
+            fn = fn_or_name
+            qual = getattr(fn, "__qualname__", None) or getattr(fn, "__name__", None) or "hint"
+            mod = getattr(fn, "__module__", "user")
+            op = f"user:{mod}.{qual}"
+            GLOBAL_HINTS.register(op, fn)
+        outs = self._b.add_hint(op, [self._as_expr(x) for x in inputs], n_outputs=n_outputs, names=names)
+        return outs[0] if n_outputs == 1 else outs
+
     def Add(self, i1: Var, i2: Var, *rest: Var) -> Expr:
         acc = lin_add(self._b.field, as_linexpr(self._b.field, self._as_expr(i1)), as_linexpr(self._b.field, self._as_expr(i2)))
         for x in rest:
@@ -113,6 +126,34 @@ class API:
 
     def MulAcc(self, a: Var, b: Var, c: Var) -> Expr:
         return self.Add(a, self.Mul(b, c))
+
+    def Inverse(self, i1: Var) -> VarRef:
+        x = self._as_expr(i1)
+        inv = self._b.add_hint("inv", [x], n_outputs=1, names=["inv"])[0]
+        self._b.add_r1cs(x, inv, 1)
+        return inv
+
+    def Div(self, i1: Var, i2: Var) -> VarRef:
+        inv = self.Inverse(i2)
+        return self.Mul(i1, inv)  # type: ignore[return-value]
+
+    def ToBinary(self, i1: Var, n_bits: int) -> List[VarRef]:
+        if n_bits <= 0:
+            raise ValueError("n_bits must be positive")
+        x = self._as_expr(i1)
+        bits = self._b.add_hint("to_binary", [x, int(n_bits)], n_outputs=n_bits, names=[f"bit{i}" for i in range(n_bits)])
+        for b in bits:
+            self._b.assert_is_boolean(b)
+        coeffs = {b.id: (1 << i) for i, b in enumerate(bits)}
+        recomposed = LinExpr.from_terms(0, coeffs)
+        self._b.assert_is_equal(x, recomposed)
+        return bits
+
+    def FromBinary(self, bits: Sequence[Var]) -> LinExpr:
+        coeffs = {self._as_expr(b).id: (1 << i) for i, b in enumerate(bits) if isinstance(self._as_expr(b), VarRef)}
+        if len(coeffs) != len(bits):
+            raise TypeError("FromBinary expects bits to be VarRef")
+        return LinExpr.from_terms(0, coeffs)
 
     def AssertIsEqual(self, i1: Var, i2: Var) -> None:
         self._b.assert_is_equal(self._as_expr(i1), self._as_expr(i2))
