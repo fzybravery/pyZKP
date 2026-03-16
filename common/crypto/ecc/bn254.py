@@ -36,6 +36,10 @@ def g2_neg(p: G2) -> G2:
     return b.neg(p)
 
 
+def g2_sub(p: G2, q: G2) -> G2:
+    return b.add(p, b.neg(q))
+
+
 def g2_mul(p: G2, s: int) -> G2:
     return b.multiply(p, int(s))
 

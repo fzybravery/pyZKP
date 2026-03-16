@@ -12,6 +12,7 @@ from .bn254 import (
     g2_eq,
     g2_mul,
     g2_neg,
+    g2_sub,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "g2_eq",
     "g2_mul",
     "g2_neg",
+    "g2_sub",
 ]
