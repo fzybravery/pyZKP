@@ -20,10 +20,17 @@ class R1CSInstance:
     aux_ids: List[int]
 
 
+def _next_power_of_two(n: int) -> int:
+    if n <= 1:
+        return 1
+    return 1 << (n - 1).bit_length()
+
+
 def compile_r1cs(ir: CircuitIR) -> R1CSInstance:
     m = len(ir.vars)
     one_id = m
-    n = len(ir.constraints)
+    n0 = len(ir.constraints)
+    n = _next_power_of_two(n0)
     pub_ids = sorted([v.id for v in ir.vars if v.visibility.value == "public"])
     pub_names = [v.name for v in sorted([v for v in ir.vars if v.visibility.value == "public"], key=lambda x: x.id)]
     public_ids = [one_id] + pub_ids
@@ -38,6 +45,11 @@ def compile_r1cs(ir: CircuitIR) -> R1CSInstance:
         a_rows.append(_linexpr_to_row(c.a, one_id))
         b_rows.append(_linexpr_to_row(c.b, one_id))
         c_rows.append(_linexpr_to_row(c.c, one_id))
+
+    while len(a_rows) < n:
+        a_rows.append({})
+        b_rows.append({})
+        c_rows.append({})
 
     return R1CSInstance(
         n_constraints=n,

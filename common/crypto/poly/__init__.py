@@ -10,11 +10,37 @@ from .cpu_ref import (
     poly_sub,
     poly_vanishing_from_roots,
 )
+from .ntt import (
+    coeffs_from_evals_on_roots,
+    coeffs_from_evals_on_coset,
+    evals_from_coeffs_on_roots,
+    evals_from_coeffs_on_coset,
+    intt,
+    intt_inplace,
+    ntt,
+    ntt_inplace,
+    omega_for_size,
+    poly_mul_ntt,
+    roots_of_unity,
+)
+from .fast import poly_div_by_xn_minus_1
+from .repr import PolyCoeffs, PolyEvals
 
 __all__ = [
     "barycentric_precompute",
     "barycentric_value",
     "lagrange_interpolate",
+    "coeffs_from_evals_on_roots",
+    "coeffs_from_evals_on_coset",
+    "evals_from_coeffs_on_roots",
+    "evals_from_coeffs_on_coset",
+    "intt",
+    "intt_inplace",
+    "ntt",
+    "ntt_inplace",
+    "omega_for_size",
+    "poly_mul_ntt",
+    "poly_div_by_xn_minus_1",
     "poly_add",
     "poly_divmod",
     "poly_eval",
@@ -22,4 +48,7 @@ __all__ = [
     "poly_scale",
     "poly_sub",
     "poly_vanishing_from_roots",
+    "PolyCoeffs",
+    "PolyEvals",
+    "roots_of_unity",
 ]

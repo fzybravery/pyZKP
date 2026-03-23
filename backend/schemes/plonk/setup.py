@@ -3,7 +3,7 @@ from __future__ import annotations
 from pyZKP.backend.schemes.plonk.lowering import lower_to_circuit
 from pyZKP.backend.schemes.plonk.types import ProvingKey, VerifyingKey
 from pyZKP.common.crypto.kzg.cpu_ref import commit, setup_srs
-from pyZKP.common.crypto.poly import lagrange_interpolate
+from pyZKP.common.crypto.poly import coeffs_from_evals_on_roots
 from pyZKP.common.ir.core import CircuitIR
 
 
@@ -13,15 +13,15 @@ def setup(ir: CircuitIR) -> ProvingKey:
     max_deg = 8 * n
     srs = setup_srs(max_deg)
 
-    xs = list(circuit.domain.roots)
-    coeff_sigma1 = tuple(lagrange_interpolate(xs, list(circuit.sigma1_eval)))
-    coeff_sigma2 = tuple(lagrange_interpolate(xs, list(circuit.sigma2_eval)))
-    coeff_sigma3 = tuple(lagrange_interpolate(xs, list(circuit.sigma3_eval)))
-    coeff_ql = tuple(lagrange_interpolate(xs, list(circuit.ql_eval)))
-    coeff_qr = tuple(lagrange_interpolate(xs, list(circuit.qr_eval)))
-    coeff_qm = tuple(lagrange_interpolate(xs, list(circuit.qm_eval)))
-    coeff_qo = tuple(lagrange_interpolate(xs, list(circuit.qo_eval)))
-    coeff_qc = tuple(lagrange_interpolate(xs, list(circuit.qc_eval)))
+    omega = circuit.domain.omega
+    coeff_sigma1 = tuple(coeffs_from_evals_on_roots(circuit.sigma1_eval, omega=omega))
+    coeff_sigma2 = tuple(coeffs_from_evals_on_roots(circuit.sigma2_eval, omega=omega))
+    coeff_sigma3 = tuple(coeffs_from_evals_on_roots(circuit.sigma3_eval, omega=omega))
+    coeff_ql = tuple(coeffs_from_evals_on_roots(circuit.ql_eval, omega=omega))
+    coeff_qr = tuple(coeffs_from_evals_on_roots(circuit.qr_eval, omega=omega))
+    coeff_qm = tuple(coeffs_from_evals_on_roots(circuit.qm_eval, omega=omega))
+    coeff_qo = tuple(coeffs_from_evals_on_roots(circuit.qo_eval, omega=omega))
+    coeff_qc = tuple(coeffs_from_evals_on_roots(circuit.qc_eval, omega=omega))
 
     cm_sigma1 = commit(srs, coeff_sigma1)
     cm_sigma2 = commit(srs, coeff_sigma2)

@@ -1,20 +1,20 @@
 from __future__ import annotations
 
+import secrets
 from typing import Dict, List, Sequence, Tuple
 
 from pyZKP.backend.schemes.plonk.transcript import Transcript
 from pyZKP.backend.schemes.plonk.types import Proof, ProvingKey
 from pyZKP.common.crypto.ecc.bn254 import G1, G1_ZERO, g1_add, g1_mul
+from pyZKP.common.crypto.field import fr_batch_inv
 from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv
 from pyZKP.common.crypto.kzg.cpu_ref import commit, open_proof
 from pyZKP.common.crypto.poly import (
-    lagrange_interpolate,
-    poly_add,
-    poly_divmod,
+    coeffs_from_evals_on_roots,
+    coeffs_from_evals_on_coset,
+    evals_from_coeffs_on_coset,
+    omega_for_size,
     poly_eval,
-    poly_mul,
-    poly_scale,
-    poly_sub,
 )
 from pyZKP.frontend.api.witness import Witness
 
@@ -23,7 +23,6 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     c = pk.circuit
     n = c.domain.n
     omega = c.domain.omega
-    roots = list(c.domain.roots)
 
     if len(public_values) != 1 + len(c.public_var_ids):
         raise ValueError("public_values must be [ONE] + public inputs in schema order")
@@ -35,9 +34,9 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     b_eval = [values[g.r] for g in c.gates]
     c_eval = [values[g.o] for g in c.gates]
 
-    a_coeff = tuple(lagrange_interpolate(roots, a_eval))
-    b_coeff = tuple(lagrange_interpolate(roots, b_eval))
-    c_coeff = tuple(lagrange_interpolate(roots, c_eval))
+    a_coeff = tuple(coeffs_from_evals_on_roots(a_eval, omega=omega))
+    b_coeff = tuple(coeffs_from_evals_on_roots(b_eval, omega=omega))
+    c_coeff = tuple(coeffs_from_evals_on_roots(c_eval, omega=omega))
 
     cm_a = commit(pk.srs, a_coeff)
     cm_b = commit(pk.srs, b_coeff)
@@ -47,7 +46,7 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     for i, pv in enumerate(public_values[1:]):
         row = 1 + i
         pi_eval[row] = (-int(pv)) % FR_MODULUS
-    pi_coeff = tuple(lagrange_interpolate(roots, pi_eval))
+    pi_coeff = tuple(coeffs_from_evals_on_roots(pi_eval, omega=omega))
 
     tr = Transcript()
     tr.absorb_g1(pk.vk.cm_sigma1)
@@ -68,7 +67,7 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     gamma = tr.challenge(b"gamma")
 
     z_eval = _build_permutation_z(c, a_eval, b_eval, c_eval, beta, gamma)
-    z_coeff = tuple(lagrange_interpolate(roots, z_eval))
+    z_coeff = tuple(coeffs_from_evals_on_roots(z_eval, omega=omega))
     cm_z = commit(pk.srs, z_coeff)
 
     tr.absorb_g1(cm_z)
@@ -231,69 +230,103 @@ def _compute_quotient_t_parts(
 ) -> Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]:
     c = pk.circuit
     n = c.domain.n
-    roots = list(c.domain.roots)
+    omega = c.domain.omega
 
-    def const(k: int) -> List[int]:
-        return [int(k) % FR_MODULUS]
+    m = 4 * n
+    omega_m = omega_for_size(m)
+    u = pow(int(omega_m) % FR_MODULUS, n, FR_MODULUS)
 
-    x_poly = [0, 1]
-    zh_poly = [(-1) % FR_MODULUS] + [0] * (n - 1) + [1]
+    bad = {1 % FR_MODULUS, u % FR_MODULUS, (u * u) % FR_MODULUS, (u * u * u) % FR_MODULUS}
+    while True:
+        shift = secrets.randbelow(FR_MODULUS - 1) + 1
+        shift_n = pow(shift, n, FR_MODULUS)
+        if shift_n not in bad:
+            break
+
+    a_ext = evals_from_coeffs_on_coset(a_coeff, n=m, omega=omega_m, shift=shift)
+    b_ext = evals_from_coeffs_on_coset(b_coeff, n=m, omega=omega_m, shift=shift)
+    c_ext = evals_from_coeffs_on_coset(c_coeff, n=m, omega=omega_m, shift=shift)
+    z_ext = evals_from_coeffs_on_coset(z_coeff, n=m, omega=omega_m, shift=shift)
+    pi_ext = evals_from_coeffs_on_coset(pi_coeff, n=m, omega=omega_m, shift=shift)
+
+    ql_ext = evals_from_coeffs_on_coset(pk.coeff_ql, n=m, omega=omega_m, shift=shift)
+    qr_ext = evals_from_coeffs_on_coset(pk.coeff_qr, n=m, omega=omega_m, shift=shift)
+    qm_ext = evals_from_coeffs_on_coset(pk.coeff_qm, n=m, omega=omega_m, shift=shift)
+    qo_ext = evals_from_coeffs_on_coset(pk.coeff_qo, n=m, omega=omega_m, shift=shift)
+    qc_ext = evals_from_coeffs_on_coset(pk.coeff_qc, n=m, omega=omega_m, shift=shift)
+
+    s1_ext = evals_from_coeffs_on_coset(pk.coeff_sigma1, n=m, omega=omega_m, shift=shift)
+    s2_ext = evals_from_coeffs_on_coset(pk.coeff_sigma2, n=m, omega=omega_m, shift=shift)
+    s3_ext = evals_from_coeffs_on_coset(pk.coeff_sigma3, n=m, omega=omega_m, shift=shift)
+
+    shift_zw = (int(shift) * int(omega)) % FR_MODULUS
+    zshift_ext = evals_from_coeffs_on_coset(z_coeff, n=m, omega=omega_m, shift=shift_zw)
+
     l1_eval = [1] + [0] * (n - 1)
-    l1_coeff = lagrange_interpolate(roots, l1_eval)
+    l1_coeff = coeffs_from_evals_on_roots(l1_eval, omega=omega)
+    l1_ext = evals_from_coeffs_on_coset(l1_coeff, n=m, omega=omega_m, shift=shift)
 
-    z_shift_eval = list(z_eval[1:]) + [int(z_eval[0]) % FR_MODULUS]
-    z_shift_coeff = lagrange_interpolate(roots, z_shift_eval)
+    alpha = int(alpha) % FR_MODULUS
+    beta = int(beta) % FR_MODULUS
+    gamma = int(gamma) % FR_MODULUS
+    alpha2 = (alpha * alpha) % FR_MODULUS
+    k1 = int(c.k1) % FR_MODULUS
+    k2 = int(c.k2) % FR_MODULUS
 
-    a = list(a_coeff)
-    b = list(b_coeff)
-    cc = list(c_coeff)
-    z = list(z_coeff)
-    pi = list(pi_coeff)
+    roots_m = 1
+    x = shift % FR_MODULUS
+    shift_n = pow(int(shift) % FR_MODULUS, n, FR_MODULUS)
 
-    ql = list(pk.coeff_ql)
-    qr = list(pk.coeff_qr)
-    qm = list(pk.coeff_qm)
-    qo = list(pk.coeff_qo)
-    qc = list(pk.coeff_qc)
-    s1 = list(pk.coeff_sigma1)
-    s2 = list(pk.coeff_sigma2)
-    s3 = list(pk.coeff_sigma3)
+    zh_list: List[int] = []
+    num_list: List[int] = []
+    for i in range(m):
+        a = a_ext[i]
+        b = b_ext[i]
+        cc = c_ext[i]
+        z = z_ext[i]
 
-    ab = poly_mul(a, b)
-    gate = poly_add(poly_mul(ql, a), poly_mul(qr, b))
-    gate = poly_add(gate, poly_mul(qm, ab))
-    gate = poly_add(gate, poly_mul(qo, cc))
-    gate = poly_add(gate, qc)
-    gate = poly_add(gate, pi)
+        gate = (ql_ext[i] * a + qr_ext[i] * b) % FR_MODULUS
+        gate = (gate + qm_ext[i] * a % FR_MODULUS * b) % FR_MODULUS
+        gate = (gate + qo_ext[i] * cc + qc_ext[i] + pi_ext[i]) % FR_MODULUS
 
-    beta_x = poly_scale(x_poly, beta)
-    beta_k1_x = poly_scale(x_poly, (int(beta) * int(c.k1)) % FR_MODULUS)
-    beta_k2_x = poly_scale(x_poly, (int(beta) * int(c.k2)) % FR_MODULUS)
+        t1 = (a + beta * x + gamma) % FR_MODULUS
+        t2 = (b + beta * k1 % FR_MODULUS * x + gamma) % FR_MODULUS
+        t3 = (cc + beta * k2 % FR_MODULUS * x + gamma) % FR_MODULUS
+        left = (t1 * t2) % FR_MODULUS
+        left = (left * t3) % FR_MODULUS
+        left = (left * z) % FR_MODULUS
 
-    t1 = poly_add(poly_add(a, beta_x), const(gamma))
-    t2 = poly_add(poly_add(b, beta_k1_x), const(gamma))
-    t3 = poly_add(poly_add(cc, beta_k2_x), const(gamma))
-    left = poly_mul(poly_mul(poly_mul(z, t1), t2), t3)
+        u1v = (a + beta * s1_ext[i] + gamma) % FR_MODULUS
+        u2v = (b + beta * s2_ext[i] + gamma) % FR_MODULUS
+        u3v = (cc + beta * s3_ext[i] + gamma) % FR_MODULUS
+        right = (u1v * u2v) % FR_MODULUS
+        right = (right * u3v) % FR_MODULUS
+        right = (right * zshift_ext[i]) % FR_MODULUS
 
-    u1 = poly_add(poly_add(a, poly_scale(s1, beta)), const(gamma))
-    u2 = poly_add(poly_add(b, poly_scale(s2, beta)), const(gamma))
-    u3 = poly_add(poly_add(cc, poly_scale(s3, beta)), const(gamma))
-    right = poly_mul(poly_mul(poly_mul(z_shift_coeff, u1), u2), u3)
+        perm = (left - right) % FR_MODULUS
+        boundary = ((z - 1) % FR_MODULUS) * (l1_ext[i] % FR_MODULUS) % FR_MODULUS
 
-    perm = poly_sub(left, right)
+        num = (gate + alpha * perm + alpha2 * boundary) % FR_MODULUS
+        num_list.append(num)
 
-    boundary = poly_mul(poly_sub(z, const(1)), l1_coeff)
-    num = poly_add(gate, poly_scale(perm, alpha))
-    num = poly_add(num, poly_scale(boundary, (int(alpha) * int(alpha)) % FR_MODULUS))
+        x_n = (shift_n * pow(u, i, FR_MODULUS)) % FR_MODULUS
+        zh = (x_n - 1) % FR_MODULUS
+        zh_list.append(zh)
 
-    t_coeff, rem = poly_divmod(num, zh_poly)
-    if len(rem) != 0:
-        raise ValueError("quotient not divisible by ZH")
+        roots_m = (roots_m * omega_m) % FR_MODULUS
+        x = (x * omega_m) % FR_MODULUS
 
-    coeffs = list(t_coeff)
+    inv_zh = fr_batch_inv(zh_list)
+    t_ext = [(num_list[i] * inv_zh[i]) % FR_MODULUS for i in range(m)]
+
+    t_coeff_full = coeffs_from_evals_on_coset(t_ext, omega=omega_m, shift=shift)
+    for v in t_coeff_full[3 * n :]:
+        if v % FR_MODULUS != 0:
+            raise ValueError("quotient degree too large")
+
+    coeffs = list(t_coeff_full[: 3 * n])
     if len(coeffs) < 3 * n:
         coeffs.extend([0] * (3 * n - len(coeffs)))
-    coeffs = coeffs[: 3 * n]
     t1_coeff = tuple(coeffs[0:n])
     t2_coeff = tuple(coeffs[n : 2 * n])
     t3_coeff = tuple(coeffs[2 * n : 3 * n])

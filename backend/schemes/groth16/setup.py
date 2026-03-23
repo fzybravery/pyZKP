@@ -6,7 +6,7 @@ from pyZKP.backend.schemes.groth16.r1cs import R1CSInstance, compile_r1cs
 from pyZKP.backend.schemes.groth16.types import ProvingKey, VerifyingKey
 from pyZKP.common.crypto.ecc.bn254 import G1, G2, G1_GENERATOR, G2_GENERATOR, g1_mul, g2_mul
 from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv, fr_rand
-from pyZKP.common.crypto.poly import barycentric_precompute, barycentric_value, poly_eval, poly_vanishing_from_roots
+from pyZKP.common.crypto.poly import coeffs_from_evals_on_roots, omega_for_size, poly_eval
 from pyZKP.common.ir.core import CircuitIR
 
 
@@ -15,15 +15,12 @@ def setup(ir: CircuitIR) -> ProvingKey:
     n = r1cs.n_constraints
     m = r1cs.n_vars
     one_id = r1cs.one_id
-
-    xs = [(i + 1) % FR_MODULUS for i in range(n)]
-    xs_pre, ws = barycentric_precompute(xs)
-
-    t_poly = poly_vanishing_from_roots(xs)
+    omega = omega_for_size(n)
+    t_poly = [(-1) % FR_MODULUS] + [0] * (n - 1) + [1]
 
     while True:
         tau = fr_rand(nonzero=True)
-        t_tau = poly_eval(t_poly, tau)
+        t_tau = (pow(tau, n, FR_MODULUS) - 1) % FR_MODULUS
         if t_tau % FR_MODULUS != 0:
             break
 
@@ -56,9 +53,12 @@ def setup(ir: CircuitIR) -> ProvingKey:
         bys = [_row_value(r1cs.b_rows[j], var_id) for j in range(n)]
         cys = [_row_value(r1cs.c_rows[j], var_id) for j in range(n)]
 
-        a_tau = barycentric_value(xs_pre, ws, ays, tau)
-        b_tau = barycentric_value(xs_pre, ws, bys, tau)
-        c_tau = barycentric_value(xs_pre, ws, cys, tau)
+        a_coeff = coeffs_from_evals_on_roots(ays, omega=omega)
+        b_coeff = coeffs_from_evals_on_roots(bys, omega=omega)
+        c_coeff = coeffs_from_evals_on_roots(cys, omega=omega)
+        a_tau = poly_eval(a_coeff, tau)
+        b_tau = poly_eval(b_coeff, tau)
+        c_tau = poly_eval(c_coeff, tau)
 
         a_query.append(g1_mul(G1_GENERATOR, a_tau))
         b_query_g2.append(g2_mul(G2_GENERATOR, b_tau))
@@ -71,7 +71,7 @@ def setup(ir: CircuitIR) -> ProvingKey:
             l_map[var_id] = g1_mul(G1_GENERATOR, (k_tau * inv_delta) % FR_MODULUS)
 
     h_query: List[G1] = []
-    t_tau = poly_eval(t_poly, tau) % FR_MODULUS
+    t_tau = (pow(tau, n, FR_MODULUS) - 1) % FR_MODULUS
     for k in range(n - 1):
         s = (pow(tau, k, FR_MODULUS) * t_tau) % FR_MODULUS
         s = (s * inv_delta) % FR_MODULUS
@@ -79,17 +79,7 @@ def setup(ir: CircuitIR) -> ProvingKey:
 
     ic: List[G1] = []
     for pid in r1cs.public_ids:
-        if pid == one_id:
-            ays = [_row_value(r1cs.a_rows[j], one_id) for j in range(n)]
-            bys = [_row_value(r1cs.b_rows[j], one_id) for j in range(n)]
-            cys = [_row_value(r1cs.c_rows[j], one_id) for j in range(n)]
-            a_tau = barycentric_value(xs_pre, ws, ays, tau)
-            b_tau = barycentric_value(xs_pre, ws, bys, tau)
-            c_tau = barycentric_value(xs_pre, ws, cys, tau)
-            k_tau = (beta * a_tau + alpha * b_tau + c_tau) % FR_MODULUS
-            ic.append(g1_mul(G1_GENERATOR, (k_tau * inv_gamma) % FR_MODULUS))
-        else:
-            ic.append(ic_map[pid])
+        ic.append(ic_map[pid])
 
     l_query: List[G1] = [l_map[i] for i in aux_ids]
 
