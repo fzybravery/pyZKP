@@ -6,6 +6,16 @@ from typing import Dict, List, Sequence, Tuple
 from pyZKP.common.crypto.field.fr import FR_MODULUS
 from pyZKP.common.ir.core import CircuitIR, LinExpr
 
+"""
+将通用的电路 IR 编译为 Groth16 所需的标准 R1CS 稀疏矩阵格式。
+工作流程：
+1. 为常数项 1 分配专用的 one_id。
+2. 将约束数量向上对齐到 2 的幂次，以满足后续 NTT 算法的需求。
+3. 对变量进行归类，强制 one_id 和 public 输入位于序列前端。
+4. 遍历所有约束，将 LinExpr 转换为 {var_id: coeff} 形式的稀疏行向量。
+返回包含完整 A, B, C 矩阵结构及变量分类信息的 R1CSInstance 对象。
+"""
+
 
 @dataclass(frozen=True)
 class R1CSInstance:

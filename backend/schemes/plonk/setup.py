@@ -8,11 +8,13 @@ from pyZKP.common.ir.core import CircuitIR
 
 
 def setup(ir: CircuitIR) -> ProvingKey:
+    # 电路转换，生成srs
     circuit = lower_to_circuit(ir)
     n = circuit.domain.n
     max_deg = 8 * n
     srs = setup_srs(max_deg)
 
+    # 将电路门选择器和置换索引构造为多项式
     omega = circuit.domain.omega
     coeff_sigma1 = tuple(coeffs_from_evals_on_roots(circuit.sigma1_eval, omega=omega))
     coeff_sigma2 = tuple(coeffs_from_evals_on_roots(circuit.sigma2_eval, omega=omega))

@@ -6,18 +6,27 @@ from typing import Dict, List, Sequence, Tuple
 from pyZKP.backend.schemes.plonk.transcript import Transcript
 from pyZKP.backend.schemes.plonk.types import Proof, ProvingKey
 from pyZKP.common.crypto.ecc.bn254 import G1, G1_ZERO, g1_add, g1_mul
-from pyZKP.common.crypto.field import fr_batch_inv
 from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv
-from pyZKP.common.crypto.kzg.cpu_ref import commit, open_proof
+from pyZKP.common.crypto.kzg.cpu_ref import commit
 from pyZKP.common.crypto.poly import (
     coeffs_from_evals_on_roots,
-    coeffs_from_evals_on_coset,
-    evals_from_coeffs_on_coset,
     omega_for_size,
     poly_eval,
 )
 from pyZKP.frontend.api.witness import Witness
+from pyZKP.runtime import Executor, KernelRegistry
+from pyZKP.runtime.ir import Device, DType, Graph, OpType
+from pyZKP.runtime.kernels.cpu import register_cpu_kernels
 
+
+# 核心证明生成函数（Prover）。
+# 严格按照 PLONK 协议流程执行：
+# 1. 补全所有门电路导线的求值 (a, b, c)。
+# 2. 生成线缆多项式的 KZG 承诺。
+# 3. 通过 Transcript 获取挑战因子 beta, gamma，计算并承诺置换多项式 Z。
+# 4. 获取 alpha，在扩展的陪集域上计算商多项式 T，将其分割为 t1, t2, t3 并承诺。
+# 5. 获取求值点 zeta，计算所有多项式在 zeta (及 zeta*omega) 处的求值。
+# 6. 利用挑战因子 v 将所有多项式折叠（Fold），生成批量的 KZG 打开证明（pi_zeta, pi_zeta_omega）。
 
 def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Proof:
     c = pk.circuit
@@ -29,18 +38,34 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     if int(public_values[0]) % FR_MODULUS != 1:
         raise ValueError("public_values[0] must be ONE==1")
 
+    # 将 witness 中的变量值填入门电路
     values = _build_extended_values(c, witness)
     a_eval = [values[g.l] for g in c.gates]
     b_eval = [values[g.r] for g in c.gates]
     c_eval = [values[g.o] for g in c.gates]
-
+    
+    # 将线性组合的系数转换为多项式系数
     a_coeff = tuple(coeffs_from_evals_on_roots(a_eval, omega=omega))
     b_coeff = tuple(coeffs_from_evals_on_roots(b_eval, omega=omega))
     c_coeff = tuple(coeffs_from_evals_on_roots(c_eval, omega=omega))
 
-    cm_a = commit(pk.srs, a_coeff)
-    cm_b = commit(pk.srs, b_coeff)
-    cm_c = commit(pk.srs, c_coeff)
+    reg = KernelRegistry()
+    register_cpu_kernels(reg)
+    exe = Executor(registry=reg)
+
+    # 生成 A, B, C 的 KZG 证明
+    g0 = Graph()
+    g0.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
+    g0.add_buffer(id="a_coeff", device=Device.CPU, dtype=DType.FR, data=list(a_coeff))
+    g0.add_buffer(id="b_coeff", device=Device.CPU, dtype=DType.FR, data=list(b_coeff))
+    g0.add_buffer(id="c_coeff", device=Device.CPU, dtype=DType.FR, data=list(c_coeff))
+    g0.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "a_coeff"], outputs=["cm_a"])
+    g0.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "b_coeff"], outputs=["cm_b"])
+    g0.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "c_coeff"], outputs=["cm_c"])
+    exe.run(g0)
+    cm_a = g0.buffers["cm_a"].data
+    cm_b = g0.buffers["cm_b"].data
+    cm_c = g0.buffers["cm_c"].data
 
     pi_eval = [0] * n
     for i, pv in enumerate(public_values[1:]):
@@ -48,6 +73,7 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
         pi_eval[row] = (-int(pv)) % FR_MODULUS
     pi_coeff = tuple(coeffs_from_evals_on_roots(pi_eval, omega=omega))
 
+    # 通过挑战响应协议生成 beta 和 gamma
     tr = Transcript()
     tr.absorb_g1(pk.vk.cm_sigma1)
     tr.absorb_g1(pk.vk.cm_sigma2)
@@ -66,13 +92,21 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     beta = tr.challenge(b"beta")
     gamma = tr.challenge(b"gamma")
 
+    # 生成并承诺置换多项式
     z_eval = _build_permutation_z(c, a_eval, b_eval, c_eval, beta, gamma)
     z_coeff = tuple(coeffs_from_evals_on_roots(z_eval, omega=omega))
-    cm_z = commit(pk.srs, z_coeff)
+    gz = Graph()
+    gz.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
+    gz.add_buffer(id="z_coeff", device=Device.CPU, dtype=DType.FR, data=list(z_coeff))
+    gz.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "z_coeff"], outputs=["cm_z"])
+    exe.run(gz)
+    cm_z = gz.buffers["cm_z"].data
 
+    # 生成 alpha
     tr.absorb_g1(cm_z)
     alpha = tr.challenge(b"alpha")
-
+    
+    # 在陪集上计算商多项式，并且分割为三部分，生成对应的承诺
     t1_coeff, t2_coeff, t3_coeff = _compute_quotient_t_parts(
         pk=pk,
         a_coeff=a_coeff,
@@ -85,16 +119,27 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
         beta=beta,
         gamma=gamma,
     )
-    cm_t1 = commit(pk.srs, t1_coeff)
-    cm_t2 = commit(pk.srs, t2_coeff)
-    cm_t3 = commit(pk.srs, t3_coeff)
+    gt = Graph()
+    gt.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
+    gt.add_buffer(id="t1_coeff", device=Device.CPU, dtype=DType.FR, data=list(t1_coeff))
+    gt.add_buffer(id="t2_coeff", device=Device.CPU, dtype=DType.FR, data=list(t2_coeff))
+    gt.add_buffer(id="t3_coeff", device=Device.CPU, dtype=DType.FR, data=list(t3_coeff))
+    gt.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "t1_coeff"], outputs=["cm_t1"])
+    gt.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "t2_coeff"], outputs=["cm_t2"])
+    gt.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "t3_coeff"], outputs=["cm_t3"])
+    exe.run(gt)
+    cm_t1 = gt.buffers["cm_t1"].data
+    cm_t2 = gt.buffers["cm_t2"].data
+    cm_t3 = gt.buffers["cm_t3"].data
 
+    # 生成 zeta
     tr.absorb_g1(cm_t1)
     tr.absorb_g1(cm_t2)
     tr.absorb_g1(cm_t3)
     zeta = tr.challenge(b"zeta")
     zeta_omega = (zeta * omega) % FR_MODULUS
 
+    # 计算多项式在 zeta 点的值
     evals = _collect_evals(pk, a_coeff, b_coeff, c_coeff, z_coeff, t1_coeff, t2_coeff, t3_coeff, pi_coeff, zeta)
     z_zw = poly_eval(z_coeff, zeta_omega)
 
@@ -116,6 +161,7 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     tr.absorb_int(evals["qc"])
     v = tr.challenge(b"v")
 
+    # 利用 v 折叠多项式
     polys = [
         ("a", a_coeff, cm_a, evals["a"]),
         ("b", b_coeff, cm_b, evals["b"]),
@@ -134,11 +180,24 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
         ("qc", pk.coeff_qc, pk.vk.cm_qc, evals["qc"]),
     ]
     combined_coeff, combined_cm, combined_y = _fold(polys, v)
-    y_check, pi_zeta = open_proof(pk.srs, combined_coeff, zeta)
+
+    # 生成 KZG 证明
+    go = Graph()
+    go.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
+    go.add_buffer(id="combined_coeff", device=Device.CPU, dtype=DType.FR, data=list(combined_coeff))
+    go.add_node(op=OpType.KZG_OPEN, inputs=["srs", "combined_coeff"], outputs=["y_check", "pi_zeta"], attrs={"z": int(zeta)})
+    exe.run(go)
+    y_check = int(go.buffers["y_check"].data) % FR_MODULUS
+    pi_zeta = go.buffers["pi_zeta"].data
     if y_check % FR_MODULUS != combined_y % FR_MODULUS:
         raise ValueError("batch opening mismatch")
 
-    _, pi_zeta_omega = open_proof(pk.srs, z_coeff, zeta_omega)
+    go2 = Graph()
+    go2.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
+    go2.add_buffer(id="z_coeff", device=Device.CPU, dtype=DType.FR, data=list(z_coeff))
+    go2.add_node(op=OpType.KZG_OPEN, inputs=["srs", "z_coeff"], outputs=["z_y", "pi_zeta_omega"], attrs={"z": int(zeta_omega)})
+    exe.run(go2)
+    pi_zeta_omega = go2.buffers["pi_zeta_omega"].data
 
     return Proof(
         cm_a=cm_a,
@@ -154,7 +213,10 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
         pi_zeta_omega=pi_zeta_omega,
     )
 
-
+# 扩展变量求值函数。
+# 遍历电路中的所有标准门（Gate），根据初始的 Witness 值和门类型（add, mul, scale, const 等），
+# 推导出所有中间导线和输出导线的具体数值。
+# 如果某些导线未被使用，则默认填充为 0，确保所有索引都有对应的域元素。
 def _build_extended_values(c, witness: Witness) -> List[int]:
     max_id = c.one_id
     for g in c.gates:
@@ -190,7 +252,9 @@ def _build_extended_values(c, witness: Witness) -> List[int]:
         values[i] = 0
     return [int(v) for v in values]  # type: ignore[arg-type]
 
-
+# 计算置换累积多项式 (Permutation Accumulator) Z 的求值序列。
+# 利用挑战因子 beta 和 gamma，对标准索引（id1, id2, id3）和置换索引（sigma1, sigma2, sigma3）
+# 下的导线值进行累乘。用于证明电路中不同门之间导线的连接一致性（Copy Constraints）。
 def _build_permutation_z(c, a_eval, b_eval, c_eval, beta: int, gamma: int) -> List[int]:
     n = c.domain.n
     roots = c.domain.roots
@@ -214,7 +278,11 @@ def _build_permutation_z(c, a_eval, b_eval, c_eval, beta: int, gamma: int) -> Li
         z[i + 1] = acc
     return z
 
-
+# 计算核心商多项式 T(x) 并进行分段。
+# 1. 为了避免除以零多项式 Z_H(x) 导致分母为 0，将所有多项式通过 Coset iNTT/NTT 转换到偏移大小为 4n 的陪集上。
+# 2. 在计算图（Graph）中利用 PLONK_T_QUOTIENT_EVALS 算子，合并门约束和置换约束。
+# 3. 将结果除以 Z_H 后转回系数表示。
+# 4. 由于 T(x) 的度数最高可达 3n，需将其切割为 3 个度数小于 n 的多项式 t1, t2, t3 以适配 KZG 承诺容量。
 def _compute_quotient_t_parts(
     *,
     pk: ProvingKey,
@@ -243,83 +311,93 @@ def _compute_quotient_t_parts(
         if shift_n not in bad:
             break
 
-    a_ext = evals_from_coeffs_on_coset(a_coeff, n=m, omega=omega_m, shift=shift)
-    b_ext = evals_from_coeffs_on_coset(b_coeff, n=m, omega=omega_m, shift=shift)
-    c_ext = evals_from_coeffs_on_coset(c_coeff, n=m, omega=omega_m, shift=shift)
-    z_ext = evals_from_coeffs_on_coset(z_coeff, n=m, omega=omega_m, shift=shift)
-    pi_ext = evals_from_coeffs_on_coset(pi_coeff, n=m, omega=omega_m, shift=shift)
-
-    ql_ext = evals_from_coeffs_on_coset(pk.coeff_ql, n=m, omega=omega_m, shift=shift)
-    qr_ext = evals_from_coeffs_on_coset(pk.coeff_qr, n=m, omega=omega_m, shift=shift)
-    qm_ext = evals_from_coeffs_on_coset(pk.coeff_qm, n=m, omega=omega_m, shift=shift)
-    qo_ext = evals_from_coeffs_on_coset(pk.coeff_qo, n=m, omega=omega_m, shift=shift)
-    qc_ext = evals_from_coeffs_on_coset(pk.coeff_qc, n=m, omega=omega_m, shift=shift)
-
-    s1_ext = evals_from_coeffs_on_coset(pk.coeff_sigma1, n=m, omega=omega_m, shift=shift)
-    s2_ext = evals_from_coeffs_on_coset(pk.coeff_sigma2, n=m, omega=omega_m, shift=shift)
-    s3_ext = evals_from_coeffs_on_coset(pk.coeff_sigma3, n=m, omega=omega_m, shift=shift)
-
-    shift_zw = (int(shift) * int(omega)) % FR_MODULUS
-    zshift_ext = evals_from_coeffs_on_coset(z_coeff, n=m, omega=omega_m, shift=shift_zw)
-
     l1_eval = [1] + [0] * (n - 1)
     l1_coeff = coeffs_from_evals_on_roots(l1_eval, omega=omega)
-    l1_ext = evals_from_coeffs_on_coset(l1_coeff, n=m, omega=omega_m, shift=shift)
 
-    alpha = int(alpha) % FR_MODULUS
-    beta = int(beta) % FR_MODULUS
-    gamma = int(gamma) % FR_MODULUS
-    alpha2 = (alpha * alpha) % FR_MODULUS
-    k1 = int(c.k1) % FR_MODULUS
-    k2 = int(c.k2) % FR_MODULUS
+    reg = KernelRegistry()
+    register_cpu_kernels(reg)
+    exe = Executor(registry=reg)
+    g = Graph()
 
-    roots_m = 1
-    x = shift % FR_MODULUS
-    shift_n = pow(int(shift) % FR_MODULUS, n, FR_MODULUS)
+    g.add_buffer(id="a_coeff", device=Device.CPU, dtype=DType.FR, data=list(a_coeff))
+    g.add_buffer(id="b_coeff", device=Device.CPU, dtype=DType.FR, data=list(b_coeff))
+    g.add_buffer(id="c_coeff", device=Device.CPU, dtype=DType.FR, data=list(c_coeff))
+    g.add_buffer(id="z_coeff", device=Device.CPU, dtype=DType.FR, data=list(z_coeff))
+    g.add_buffer(id="pi_coeff", device=Device.CPU, dtype=DType.FR, data=list(pi_coeff))
 
-    zh_list: List[int] = []
-    num_list: List[int] = []
-    for i in range(m):
-        a = a_ext[i]
-        b = b_ext[i]
-        cc = c_ext[i]
-        z = z_ext[i]
+    g.add_buffer(id="ql_coeff", device=Device.CPU, dtype=DType.FR, data=list(pk.coeff_ql))
+    g.add_buffer(id="qr_coeff", device=Device.CPU, dtype=DType.FR, data=list(pk.coeff_qr))
+    g.add_buffer(id="qm_coeff", device=Device.CPU, dtype=DType.FR, data=list(pk.coeff_qm))
+    g.add_buffer(id="qo_coeff", device=Device.CPU, dtype=DType.FR, data=list(pk.coeff_qo))
+    g.add_buffer(id="qc_coeff", device=Device.CPU, dtype=DType.FR, data=list(pk.coeff_qc))
 
-        gate = (ql_ext[i] * a + qr_ext[i] * b) % FR_MODULUS
-        gate = (gate + qm_ext[i] * a % FR_MODULUS * b) % FR_MODULUS
-        gate = (gate + qo_ext[i] * cc + qc_ext[i] + pi_ext[i]) % FR_MODULUS
+    g.add_buffer(id="s1_coeff", device=Device.CPU, dtype=DType.FR, data=list(pk.coeff_sigma1))
+    g.add_buffer(id="s2_coeff", device=Device.CPU, dtype=DType.FR, data=list(pk.coeff_sigma2))
+    g.add_buffer(id="s3_coeff", device=Device.CPU, dtype=DType.FR, data=list(pk.coeff_sigma3))
 
-        t1 = (a + beta * x + gamma) % FR_MODULUS
-        t2 = (b + beta * k1 % FR_MODULUS * x + gamma) % FR_MODULUS
-        t3 = (cc + beta * k2 % FR_MODULUS * x + gamma) % FR_MODULUS
-        left = (t1 * t2) % FR_MODULUS
-        left = (left * t3) % FR_MODULUS
-        left = (left * z) % FR_MODULUS
+    g.add_buffer(id="l1_coeff", device=Device.CPU, dtype=DType.FR, data=list(l1_coeff))
 
-        u1v = (a + beta * s1_ext[i] + gamma) % FR_MODULUS
-        u2v = (b + beta * s2_ext[i] + gamma) % FR_MODULUS
-        u3v = (cc + beta * s3_ext[i] + gamma) % FR_MODULUS
-        right = (u1v * u2v) % FR_MODULUS
-        right = (right * u3v) % FR_MODULUS
-        right = (right * zshift_ext[i]) % FR_MODULUS
+    coset_attrs = {"n": m, "omega": omega_m, "shift": shift}
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["a_coeff"], outputs=["a_ext"], attrs=coset_attrs)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["b_coeff"], outputs=["b_ext"], attrs=coset_attrs)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["c_coeff"], outputs=["c_ext"], attrs=coset_attrs)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["z_coeff"], outputs=["z_ext"], attrs=coset_attrs)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["pi_coeff"], outputs=["pi_ext"], attrs=coset_attrs)
 
-        perm = (left - right) % FR_MODULUS
-        boundary = ((z - 1) % FR_MODULUS) * (l1_ext[i] % FR_MODULUS) % FR_MODULUS
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["ql_coeff"], outputs=["ql_ext"], attrs=coset_attrs)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["qr_coeff"], outputs=["qr_ext"], attrs=coset_attrs)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["qm_coeff"], outputs=["qm_ext"], attrs=coset_attrs)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["qo_coeff"], outputs=["qo_ext"], attrs=coset_attrs)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["qc_coeff"], outputs=["qc_ext"], attrs=coset_attrs)
 
-        num = (gate + alpha * perm + alpha2 * boundary) % FR_MODULUS
-        num_list.append(num)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["s1_coeff"], outputs=["s1_ext"], attrs=coset_attrs)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["s2_coeff"], outputs=["s2_ext"], attrs=coset_attrs)
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["s3_coeff"], outputs=["s3_ext"], attrs=coset_attrs)
 
-        x_n = (shift_n * pow(u, i, FR_MODULUS)) % FR_MODULUS
-        zh = (x_n - 1) % FR_MODULUS
-        zh_list.append(zh)
+    shift_zw = (int(shift) * int(omega)) % FR_MODULUS
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["z_coeff"], outputs=["zshift_ext"], attrs={"n": m, "omega": omega_m, "shift": shift_zw})
+    g.add_node(op=OpType.COSET_EVALS_FROM_COEFFS, inputs=["l1_coeff"], outputs=["l1_ext"], attrs=coset_attrs)
 
-        roots_m = (roots_m * omega_m) % FR_MODULUS
-        x = (x * omega_m) % FR_MODULUS
+    q_attrs = {
+        "n": n,
+        "m": m,
+        "omega_m": omega_m,
+        "shift": shift,
+        "shift_n": pow(int(shift) % FR_MODULUS, n, FR_MODULUS),
+        "alpha": int(alpha) % FR_MODULUS,
+        "beta": int(beta) % FR_MODULUS,
+        "gamma": int(gamma) % FR_MODULUS,
+        "k1": int(c.k1) % FR_MODULUS,
+        "k2": int(c.k2) % FR_MODULUS,
+    }
+    g.add_node(
+        op=OpType.PLONK_T_QUOTIENT_EVALS,
+        inputs=[
+            "a_ext",
+            "b_ext",
+            "c_ext",
+            "z_ext",
+            "pi_ext",
+            "ql_ext",
+            "qr_ext",
+            "qm_ext",
+            "qo_ext",
+            "qc_ext",
+            "s1_ext",
+            "s2_ext",
+            "s3_ext",
+            "zshift_ext",
+            "l1_ext",
+        ],
+        outputs=["num_ext", "zh_ext"],
+        attrs=q_attrs,
+    )
+    g.add_node(op=OpType.BATCH_INV, inputs=["zh_ext"], outputs=["inv_zh_ext"])
+    g.add_node(op=OpType.POINTWISE_MUL, inputs=["num_ext", "inv_zh_ext"], outputs=["t_ext"])
+    g.add_node(op=OpType.COSET_COEFFS_FROM_EVALS, inputs=["t_ext"], outputs=["t_coeff_full"], attrs={"omega": omega_m, "shift": shift})
 
-    inv_zh = fr_batch_inv(zh_list)
-    t_ext = [(num_list[i] * inv_zh[i]) % FR_MODULUS for i in range(m)]
-
-    t_coeff_full = coeffs_from_evals_on_coset(t_ext, omega=omega_m, shift=shift)
+    exe.run(g)
+    t_coeff_full = g.buffers["t_coeff_full"].data
     for v in t_coeff_full[3 * n :]:
         if v % FR_MODULUS != 0:
             raise ValueError("quotient degree too large")
@@ -332,7 +410,10 @@ def _compute_quotient_t_parts(
     t3_coeff = tuple(coeffs[2 * n : 3 * n])
     return t1_coeff, t2_coeff, t3_coeff
 
-
+# 批量多项式折叠函数（Batching / Folding）。
+# 为了优化验证者的工作量，利用 Transcript 提供的随机挑战因子 v，
+# 按 v 的幂次 (1, v, v^2...) 对所有的多项式系数、KZG 承诺（G1点）以及在 zeta 处的求值结果进行随机线性组合。
+# 使得验证者只需进行一次 KZG 批量打开证明（Batch Opening Proof）校验。
 def _collect_evals(pk: ProvingKey, a, b, c, z, t1, t2, t3, pi, zeta: int) -> Dict[str, int]:
     return {
         "a": poly_eval(a, zeta) % FR_MODULUS,

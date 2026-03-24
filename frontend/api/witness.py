@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, cast
 from pyZKP.common.ir.core import CircuitIR, Expr, Hint, LinExpr, VarRef
 from pyZKP.frontend.api.hints import GLOBAL_HINTS, HintRegistry
 
-
+# ZKP 的 witness，存储电路输入、输出、中间值
 @dataclass(frozen=True)
 class Witness:
     values: Tuple[int, ...]
@@ -18,7 +18,7 @@ def _inv_mod(x: int, p: int) -> int:
         return 0
     return pow(x, p - 2, p)
 
-
+# 评估表达式，根据 witness 值计算表达式的值
 def _eval_expr(modulus: int, values: List[Optional[int]], expr: Expr) -> Optional[int]:
     if isinstance(expr, int):
         return expr % modulus
@@ -37,7 +37,7 @@ def _eval_expr(modulus: int, values: List[Optional[int]], expr: Expr) -> Optiona
         return acc
     raise TypeError(f"unsupported expr: {type(expr).__name__}")
 
-
+# 收集赋值映射，将用户输入的赋值转换为 IR 中的变量 ID 映射
 def _collect_assignment_map(assignment: Any) -> Dict[str, int]:
     if isinstance(assignment, Mapping):
         return {str(k): int(v) for k, v in assignment.items()}
@@ -49,7 +49,7 @@ def _collect_assignment_map(assignment: Any) -> Dict[str, int]:
         return out
     raise TypeError("assignment must be dict-like or an object with __dict__")
 
-
+# 构建 witness
 def build_witness(ir: CircuitIR, assignment: Any, registry: HintRegistry | None = None) -> Witness:
     p = ir.field.modulus
     reg = registry or GLOBAL_HINTS
@@ -76,7 +76,7 @@ def build_witness(ir: CircuitIR, assignment: Any, registry: HintRegistry | None 
 
     return Witness(values=tuple(cast(List[int], values)))
 
-
+# 应用 hint 函数，根据 witness 值计算中间值
 def _apply_hint(p: int, values: List[Optional[int]], h: Hint, reg: HintRegistry) -> None:
     op = h.op
     if op == "mul":
@@ -150,7 +150,7 @@ def _apply_hint(p: int, values: List[Optional[int]], h: Hint, reg: HintRegistry)
     for vid, vv in zip(h.outputs, outs):
         values[vid] = int(vv) % p
 
-
+# 检查 R1CS 约束是否满足
 def check_r1cs(ir: CircuitIR, witness: Witness) -> None:
     p = ir.field.modulus
     values = list(witness.values)
@@ -168,7 +168,7 @@ def check_r1cs(ir: CircuitIR, witness: Witness) -> None:
         if (a * b - cc) % p != 0:
             raise AssertionError(f"constraint {i} unsatisfied")
 
-
+# 迭代求解缺失的变量值
 def _solve_constraints(p: int, values: List[Optional[int]], constraints: Tuple[Any, ...]) -> None:
     def is_const(le: LinExpr) -> bool:
         return len(le.terms) == 0

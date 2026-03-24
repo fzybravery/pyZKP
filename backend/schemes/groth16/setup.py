@@ -9,6 +9,18 @@ from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv, fr_rand
 from pyZKP.common.crypto.poly import coeffs_from_evals_on_roots, omega_for_size, poly_eval
 from pyZKP.common.ir.core import CircuitIR
 
+"""
+执行 Groth16 的可信设置 (Trusted Setup) 阶段。
+工作流程：
+1. 生成随机的陷门参数 (tau, alpha, beta, gamma, delta)。
+2. 将 R1CS 矩阵的列插值为多项式 A_i(x), B_i(x), C_i(x)。
+3. 在隐藏点 tau 处对多项式求值，并映射到椭圆曲线 G1/G2 上。
+4. 生成供证明者计算 A, B 的 a_query, b_query。
+5. 生成供验证者使用的公开输入查询 ic (用 gamma 隔离)。
+6. 生成供证明者使用的私密输入查询 l_query (用 delta 隔离) 以及商多项式查询 h_query。
+注意：在生产环境中，陷门参数 (trapdoor) 在执行完毕后必须被销毁。
+"""
+
 
 def setup(ir: CircuitIR) -> ProvingKey:
     r1cs = compile_r1cs(ir)

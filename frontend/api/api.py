@@ -19,15 +19,19 @@ from pyZKP.common.ir.core import (
 )
 from pyZKP.frontend.api.hints import GLOBAL_HINTS, HintFn
 
+"""
+API 接口层，允许用户编写电路
+"""
+
 
 Var = Expr
 
-
+# 电路，用户通过重写define方法来定义电路的逻辑
 class Circuit:
     def define(self, api: "API") -> None:
         raise NotImplementedError
 
-
+# 电路构建器
 @dataclass
 class _Builder:
     field: Field
@@ -86,6 +90,7 @@ class API:
     def Constant(self, v: int) -> Expr:
         return self._b.field.normalize(v)
 
+    # 允许用户自定义 hint 函数
     def Hint(self, fn_or_name: str | HintFn, inputs: Sequence[Var], n_outputs: int = 1, names: List[str] | None = None) -> Var | List[Var]:
         if isinstance(fn_or_name, str):
             op = fn_or_name

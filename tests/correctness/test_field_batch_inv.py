@@ -3,7 +3,7 @@ import unittest
 
 from pyZKP.common.crypto.field import FR_MODULUS, fr_batch_inv, fr_inv
 
-
+# 有限域批量求逆正确性测试
 class TestFieldBatchInv(unittest.TestCase):
     def test_batch_inv_matches_single_inv(self):
         xs = [secrets.randbelow(FR_MODULUS) for _ in range(200)]

@@ -8,7 +8,7 @@ from pyZKP.frontend.circuit.schema import public, secret
 
 BN254_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617
 
-
+# 立方电路
 @dataclass
 class CubicCircuit:
     x: object = secret("x")
@@ -18,7 +18,7 @@ class CubicCircuit:
         x3 = api.Mul(self.x, self.x, self.x)
         api.AssertIsEqual(self.y, api.Add(x3, self.x, 5))
 
-
+# 布尔选择电路
 @dataclass
 class BoolSelectCircuit:
     a: object = public("a")
@@ -31,7 +31,7 @@ class BoolSelectCircuit:
         sel = api.Select(self.flag, self.a, self.b)
         api.AssertIsEqual(self.out, api.Add(sel, z))
 
-
+# 同名电路
 @dataclass
 class DuplicateNameCircuit:
     a: object = public("dup")
@@ -40,6 +40,7 @@ class DuplicateNameCircuit:
     def define(self, api):
         api.AssertIsEqual(self.a, self.b)
 
+# 二进制转换电路
 @dataclass
 class ToBinaryCircuit:
     x: object = secret("x")
@@ -55,7 +56,7 @@ class ToBinaryCircuit:
 def double_hint(x: int) -> int:
     return x * 2
 
-
+# hint电路
 @dataclass
 class UserHintCircuit:
     x: object = public("x")
@@ -66,6 +67,18 @@ class UserHintCircuit:
         api.AssertIsEqual(self.out, y)
         api.AssertIsEqual(y, api.Mul(2, self.x))
 
+
+"""
+pyZKP 前端编译与 Witness 生成核心测试套件。
+
+覆盖的核心特性包括：
+1. Schema 解析与排序：确保 Public 变量始终分配在 Secret 变量之前，且能拦截同名输入错误。
+2. IR 降级逻辑：验证 api.Mul 等非线性操作被正确拆解为 R1CS 约束，并生成对应的内部中间变量。
+3. 复杂组件编译：验证 api.IsZero, api.Select 以及 api.ToBinary 等高阶组件的约束生成正确性。
+4. 内存引用安全：检查生成的所有 R1CS 约束矩阵中引用的变量 ID 均在合法范围内。
+5. 端到端求解与校验：利用 build_witness 基于初始输入推导所有内部变量（包含执行 Python 原生的 Hint 函数），
+   并利用 check_r1cs 严格验证这些推导值是否满足所有多项式约束。
+"""
 
 class TestFrontendCompileIR(unittest.TestCase):
     def test_public_secret_input_order(self):

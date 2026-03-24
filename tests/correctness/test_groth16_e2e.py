@@ -24,6 +24,21 @@ class CubicCircuit:
         api.AssertIsEqual(self.y, api.Add(x3, self.x, 5))
 
 
+
+"""
+Groth16 零知识证明系统的全链路集成测试模块。
+
+测试用例基于 CubicCircuit (y = x^3 + x + 5) 构建。
+
+核心测试点：
+1. test_groth16_end_to_end: 
+   正向闭环测试。验证电路能正确编译为 IR，基于正确的 Witness 能够生成合法的 Groth16 证明 (A, B, C)，
+   且验证者 (Verifier) 利用验证钥 (VK) 和公开输入能通过双线性配对校验。
+2. test_groth16_wrong_public_fails: 
+   反向安全性测试。验证协议的 Soundness（可靠性）。当验证者侧提供的公开输入（Public Inputs）
+   与证明者生成证明时使用的输入不一致时，配对校验必须失败。
+"""
+
 class TestGroth16E2E(unittest.TestCase):
     def test_groth16_end_to_end(self):
         ir = compile_circuit(CubicCircuit(), BN254_FR_MODULUS)

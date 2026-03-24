@@ -24,7 +24,7 @@ class SRS:
     g1_powers: Tuple[G1, ...]
     g2_powers: Tuple[G2, ...]
 
-
+# 生成 srs
 def setup_srs(max_degree: int) -> SRS:
     if max_degree < 1:
         raise ValueError("max_degree must be >= 1")
@@ -38,7 +38,7 @@ def setup_srs(max_degree: int) -> SRS:
         cur = (cur * tau) % FR_MODULUS
     return SRS(g1_powers=tuple(g1), g2_powers=tuple(g2))
 
-
+# 生成 kzg 承诺
 def commit(srs: SRS, coeffs: Sequence[int]) -> G1:
     if len(coeffs) == 0:
         return G1_ZERO
@@ -47,7 +47,7 @@ def commit(srs: SRS, coeffs: Sequence[int]) -> G1:
     scalars = [int(c) % FR_MODULUS for c in coeffs]
     return msm_naive_g1(srs.g1_powers[: len(scalars)], scalars)
 
-
+# 在域上计算多项式除法，返回商多项式系数列表
 def _synthetic_division(coeffs: Sequence[int], z: int) -> List[int]:
     if len(coeffs) <= 1:
         return []
@@ -60,7 +60,7 @@ def _synthetic_division(coeffs: Sequence[int], z: int) -> List[int]:
         out[i - 1] = acc
     return out
 
-
+# 打开证明
 def open_proof(srs: SRS, coeffs: Sequence[int], z: int) -> Tuple[int, G1]:
     zz = int(z) % FR_MODULUS
     y = poly_eval(coeffs, zz)
@@ -70,7 +70,7 @@ def open_proof(srs: SRS, coeffs: Sequence[int], z: int) -> Tuple[int, G1]:
     pi = commit(srs, q)
     return y, pi
 
-
+# 验证证明
 def verify_proof(srs: SRS, commitment: G1, z: int, y: int, proof: G1) -> bool:
     from py_ecc import optimized_bn128 as b
 

@@ -5,7 +5,7 @@ from typing import Sequence
 from pyZKP.common.crypto.ecc.bn254 import G1, G1_ZERO, g1_add, g1_mul
 from pyZKP.common.crypto.field.fr import FR_MODULUS
 
-
+# Piggenger 多标量乘法的高效实现
 def msm_pippenger(points: Sequence[G1], scalars: Sequence[int], window_bits: int = 16) -> G1:
     if len(points) != len(scalars):
         raise ValueError("points and scalars length mismatch")

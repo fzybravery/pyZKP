@@ -10,13 +10,13 @@ from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv
 ROOT_2_28 = 19103219067921713944291392827692070036145651957329286315305642004821462161904
 MAX_ORDER_LOG = 28
 
-
+# 获取大于等于 n 的最小 2 的幂次
 def next_power_of_two(n: int) -> int:
     if n <= 1:
         return 1
     return 1 << (n - 1).bit_length()
 
-
+# 计算大小为 n 的域的生成元（n次本原单位根 omega）。
 def omega_for_domain(n: int) -> int:
     nn = next_power_of_two(n)
     logn = int(math.log2(nn))
@@ -27,7 +27,7 @@ def omega_for_domain(n: int) -> int:
     expo = 1 << (MAX_ORDER_LOG - logn)
     return pow(ROOT_2_28, expo, FR_MODULUS)
 
-
+#  从 1 开始，每次乘以生成元 omega，依次生成 [1, w, w^2, ..., w^(n-1)]
 def roots_of_unity(n: int, omega: int) -> Tuple[int, ...]:
     roots: List[int] = []
     cur = 1
@@ -36,7 +36,7 @@ def roots_of_unity(n: int, omega: int) -> Tuple[int, ...]:
         cur = (cur * omega) % FR_MODULUS
     return tuple(roots)
 
-
+# 为 PLONK 的置换论证（Permutation Argument）生成陪集偏移因子 k1 和 k2
 def find_coset_factors(n: int) -> Tuple[int, int, int]:
     omega = omega_for_domain(n)
     def in_subgroup(x: int) -> bool:
@@ -53,7 +53,7 @@ def find_coset_factors(n: int) -> Tuple[int, int, int]:
             continue
         return omega, k1, k2
 
-
+# 生成一个随机的陪集偏移因子 (Coset Shift) g。
 def coset_shift(n: int) -> int:
     while True:
         g = secrets.randbelow(FR_MODULUS - 1) + 1

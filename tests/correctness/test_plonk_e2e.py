@@ -19,6 +19,22 @@ class CubicCircuit:
         api.AssertIsEqual(self.y, api.Add(x3, self.x, 5))
 
 
+"""
+PLONK 零知识证明系统的全链路集成测试模块。
+
+测试用例基于 CubicCircuit (y = x^3 + x + 5) 算术电路构建。
+
+核心测试点：
+1. test_plonk_e2e: 
+   正向闭环测试。验证系统能够正确进行电路降级与预处理 (Setup)。
+   证明者 (Prover) 能够基于正确的 Witness 和公共输入生成合法的 PLONK 证明；
+   验证者 (Verifier) 利用验证钥 (VK)、公开输入及证明，通过多项式求值和 KZG 配对校验。
+2. test_plonk_wrong_public_fails: 
+   反向安全性 (Soundness) 测试。模拟公开输入数据不一致的场景。
+   当验证者侧提供的公共输入被篡改 (如 y+1) 时，因公开多项式 PI(X) 改变，
+   必然导致最终的商多项式恒等式验证失败，确保系统具备抗伪造性。
+"""
+
 class TestPlonkE2E(unittest.TestCase):
     def test_plonk_end_to_end(self):
         ir = compile_circuit(CubicCircuit(), BN254_FR_MODULUS)

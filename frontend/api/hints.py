@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Optional
 
 HintFn = Callable[..., Any]
 
-
+# hint 函数注册表
 @dataclass
 class HintRegistry:
     _fns: Dict[str, HintFn]
@@ -24,5 +24,5 @@ class HintRegistry:
     def get(self, name: str) -> Optional[HintFn]:
         return self._fns.get(name)
 
-
+# 全局 hint 函数注册表
 GLOBAL_HINTS = HintRegistry()

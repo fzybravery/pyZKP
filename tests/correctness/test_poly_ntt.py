@@ -18,6 +18,19 @@ from pyZKP.common.crypto.poly.cpu_ref import poly_eval
 from pyZKP.common.crypto.poly.cpu_ref import poly_divmod
 
 
+"""
+多项式与数论变换 (NTT) 底层算法单元测试模块。
+
+核心测试点：
+1. NTT/iNTT 往返测试 (Roundtrip): 验证 iNTT(NTT(x)) == x，确保基准转换正确。
+2. 快速多项式乘法: 验证基于点值乘法理论 (A*B = iNTT(NTT(A) * NTT(B))) 实现的
+   O(N log N) 算法结果，与 O(N^2) 朴素多项式乘法结果完全一致。
+3. 陪集求值 (Coset Evaluation): 验证 evals_from_coeffs_on_coset 函数的批量求值结果，
+   与针对 (shift * w^i) 坐标进行的单点 Horner 算法求值一致，确保 PLONK 商多项式无除零错误。
+4. 快速除法: 验证 poly_div_by_xn_minus_1 利用多项式结构特性的 O(N) 除法算法，
+   其输出的商与余数与标准长除法 (poly_divmod) 绝对等价。
+"""
+
 class TestPolyNTT(unittest.TestCase):
     def test_ntt_roundtrip(self):
         for n in [2, 4, 8, 16, 32]:
