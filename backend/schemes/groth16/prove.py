@@ -27,7 +27,7 @@ from pyZKP.runtime.kernels.cpu import register_cpu_kernels
     该实现利用 Graph 和 Executor 将底层的多标量乘法 (MSM) 任务抽象为计算图节点，
     实现了前端逻辑与底层硬件执行的解耦，为后续的 GPU 加速铺平了道路。
 """
-def prove(ir: CircuitIR, pk: ProvingKey, witness: Witness) -> Proof:
+def prove(ir: CircuitIR, pk: ProvingKey, witness: Witness, *, runtime_trace=None, runtime_pool=None) -> Proof:
     # 编译 R1CS 约束
     r1cs = compile_r1cs(ir)
     n = r1cs.n_constraints
@@ -60,7 +60,7 @@ def prove(ir: CircuitIR, pk: ProvingKey, witness: Witness) -> Proof:
     s = fr_rand(nonzero=True)
 
     # 计算并且获取结果
-    exe.run(g)
+    exe.run(g, pool=runtime_pool, trace=runtime_trace, keep=["a_lin", "b_lin_g2", "b_lin_g1"])
     a_lin: G1 = g.buffers["a_lin"].data
     b_lin_g2: G2 = g.buffers["b_lin_g2"].data
     b_lin_g1: G1 = g.buffers["b_lin_g1"].data
@@ -70,7 +70,7 @@ def prove(ir: CircuitIR, pk: ProvingKey, witness: Witness) -> Proof:
 
     a_eval, b_eval, c_eval = eval_r1cs_vectors(r1cs, w)
     omega = omega_for_size(n)
-    qap = compute_h_from_abc_on_roots(n, omega, a_eval, b_eval, c_eval)
+    qap = compute_h_from_abc_on_roots(n, omega, a_eval, b_eval, c_eval, runtime_trace=runtime_trace, runtime_pool=runtime_pool)
     h_coeffs = list(qap.h_poly)
     if len(h_coeffs) < n - 1:
         h_coeffs = h_coeffs + [0] * (n - 1 - len(h_coeffs))
@@ -89,7 +89,7 @@ def prove(ir: CircuitIR, pk: ProvingKey, witness: Witness) -> Proof:
         g2.add_buffer(id="l_scalars", device=Device.CPU, dtype=DType.FR, data=aux_scalars)
         g2.add_node(op=OpType.MSM_G1, inputs=["l_query", "l_scalars"], outputs=["l_acc"])
 
-    exe.run(g2)
+    exe.run(g2, pool=runtime_pool, trace=runtime_trace, keep=["h_acc", "l_acc"])
     h_acc: G1 = g2.buffers["h_acc"].data
     l_acc: G1 = g2.buffers["l_acc"].data if "l_acc" in g2.buffers else G1_ZERO
 

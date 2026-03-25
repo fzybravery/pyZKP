@@ -28,7 +28,14 @@ from pyZKP.runtime.kernels.cpu import register_cpu_kernels
 # 5. 获取求值点 zeta，计算所有多项式在 zeta (及 zeta*omega) 处的求值。
 # 6. 利用挑战因子 v 将所有多项式折叠（Fold），生成批量的 KZG 打开证明（pi_zeta, pi_zeta_omega）。
 
-def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Proof:
+def prove(
+    pk: ProvingKey,
+    witness: Witness,
+    public_values: Sequence[int],
+    *,
+    runtime_trace=None,
+    runtime_pool=None,
+) -> Proof:
     c = pk.circuit
     n = c.domain.n
     omega = c.domain.omega
@@ -52,6 +59,8 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     reg = KernelRegistry()
     register_cpu_kernels(reg)
     exe = Executor(registry=reg)
+    pool = runtime_pool
+    trace = runtime_trace
 
     # 生成 A, B, C 的 KZG 证明
     g0 = Graph()
@@ -62,7 +71,7 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     g0.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "a_coeff"], outputs=["cm_a"])
     g0.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "b_coeff"], outputs=["cm_b"])
     g0.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "c_coeff"], outputs=["cm_c"])
-    exe.run(g0)
+    exe.run(g0, pool=pool, trace=trace, keep=["cm_a", "cm_b", "cm_c"])
     cm_a = g0.buffers["cm_a"].data
     cm_b = g0.buffers["cm_b"].data
     cm_c = g0.buffers["cm_c"].data
@@ -99,7 +108,7 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     gz.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
     gz.add_buffer(id="z_coeff", device=Device.CPU, dtype=DType.FR, data=list(z_coeff))
     gz.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "z_coeff"], outputs=["cm_z"])
-    exe.run(gz)
+    exe.run(gz, pool=pool, trace=trace, keep=["cm_z"])
     cm_z = gz.buffers["cm_z"].data
 
     # 生成 alpha
@@ -118,6 +127,8 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
         alpha=alpha,
         beta=beta,
         gamma=gamma,
+        runtime_trace=runtime_trace,
+        runtime_pool=runtime_pool,
     )
     gt = Graph()
     gt.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
@@ -127,7 +138,7 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     gt.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "t1_coeff"], outputs=["cm_t1"])
     gt.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "t2_coeff"], outputs=["cm_t2"])
     gt.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "t3_coeff"], outputs=["cm_t3"])
-    exe.run(gt)
+    exe.run(gt, pool=pool, trace=trace, keep=["cm_t1", "cm_t2", "cm_t3"])
     cm_t1 = gt.buffers["cm_t1"].data
     cm_t2 = gt.buffers["cm_t2"].data
     cm_t3 = gt.buffers["cm_t3"].data
@@ -186,7 +197,7 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     go.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
     go.add_buffer(id="combined_coeff", device=Device.CPU, dtype=DType.FR, data=list(combined_coeff))
     go.add_node(op=OpType.KZG_OPEN, inputs=["srs", "combined_coeff"], outputs=["y_check", "pi_zeta"], attrs={"z": int(zeta)})
-    exe.run(go)
+    exe.run(go, pool=pool, trace=trace, keep=["y_check", "pi_zeta"])
     y_check = int(go.buffers["y_check"].data) % FR_MODULUS
     pi_zeta = go.buffers["pi_zeta"].data
     if y_check % FR_MODULUS != combined_y % FR_MODULUS:
@@ -196,7 +207,7 @@ def prove(pk: ProvingKey, witness: Witness, public_values: Sequence[int]) -> Pro
     go2.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
     go2.add_buffer(id="z_coeff", device=Device.CPU, dtype=DType.FR, data=list(z_coeff))
     go2.add_node(op=OpType.KZG_OPEN, inputs=["srs", "z_coeff"], outputs=["z_y", "pi_zeta_omega"], attrs={"z": int(zeta_omega)})
-    exe.run(go2)
+    exe.run(go2, pool=pool, trace=trace, keep=["pi_zeta_omega"])
     pi_zeta_omega = go2.buffers["pi_zeta_omega"].data
 
     return Proof(
@@ -295,6 +306,8 @@ def _compute_quotient_t_parts(
     alpha: int,
     beta: int,
     gamma: int,
+    runtime_trace=None,
+    runtime_pool=None,
 ) -> Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]:
     c = pk.circuit
     n = c.domain.n
@@ -318,6 +331,7 @@ def _compute_quotient_t_parts(
     register_cpu_kernels(reg)
     exe = Executor(registry=reg)
     g = Graph()
+
 
     g.add_buffer(id="a_coeff", device=Device.CPU, dtype=DType.FR, data=list(a_coeff))
     g.add_buffer(id="b_coeff", device=Device.CPU, dtype=DType.FR, data=list(b_coeff))
@@ -396,7 +410,7 @@ def _compute_quotient_t_parts(
     g.add_node(op=OpType.POINTWISE_MUL, inputs=["num_ext", "inv_zh_ext"], outputs=["t_ext"])
     g.add_node(op=OpType.COSET_COEFFS_FROM_EVALS, inputs=["t_ext"], outputs=["t_coeff_full"], attrs={"omega": omega_m, "shift": shift})
 
-    exe.run(g)
+    exe.run(g, pool=runtime_pool, trace=runtime_trace, keep=["t_coeff_full"])
     t_coeff_full = g.buffers["t_coeff_full"].data
     for v in t_coeff_full[3 * n :]:
         if v % FR_MODULUS != 0:

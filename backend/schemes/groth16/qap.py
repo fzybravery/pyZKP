@@ -49,7 +49,16 @@ def compute_h_from_abc(xs: Sequence[int], a_eval: Sequence[int], b_eval: Sequenc
 3. 特殊除法 (O(n)): 计算商多项式 h(x) = P(x) / (x^n - 1)。
 如果计算出的余数不为 0，则抛出异常表示 R1CS 约束未被满足。
 """
-def compute_h_from_abc_on_roots(n: int, omega: int, a_eval: Sequence[int], b_eval: Sequence[int], c_eval: Sequence[int]) -> QAPWitnessPolys:
+def compute_h_from_abc_on_roots(
+    n: int,
+    omega: int,
+    a_eval: Sequence[int],
+    b_eval: Sequence[int],
+    c_eval: Sequence[int],
+    *,
+    runtime_trace=None,
+    runtime_pool=None,
+) -> QAPWitnessPolys:
     if not (len(a_eval) == len(b_eval) == len(c_eval) == n):
         raise ValueError("length mismatch")
     reg = KernelRegistry()
@@ -68,7 +77,7 @@ def compute_h_from_abc_on_roots(n: int, omega: int, a_eval: Sequence[int], b_eva
     g.add_node(op=OpType.POLY_SUB, inputs=["ab_coeff", "c_coeff"], outputs=["p_coeff"])
     g.add_node(op=OpType.DIV_XN_MINUS_1, inputs=["p_coeff"], outputs=["h_coeff", "rem"], attrs={"n": n})
 
-    exe.run(g)
+    exe.run(g, pool=runtime_pool, trace=runtime_trace, keep=["a_coeff", "b_coeff", "c_coeff", "h_coeff", "rem"])
     a_poly = list(g.buffers["a_coeff"].data)
     b_poly = list(g.buffers["b_coeff"].data)
     c_poly = list(g.buffers["c_coeff"].data)

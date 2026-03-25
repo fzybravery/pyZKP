@@ -7,6 +7,7 @@ from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv
 
 ROOT_2_28 = 19103219067921713944291392827692070036145651957329286315305642004821462161904
 MAX_ORDER_LOG = 28
+_WLEN_CACHE: dict[tuple[int, int, int], int] = {}
 
 # 计算 n 次单位根 omega
 def omega_for_size(n: int) -> int:
@@ -57,7 +58,11 @@ def ntt_inplace(a: List[int], omega: int) -> None:
 
     length = 2
     while length <= n:
-        wlen = pow(int(omega) % FR_MODULUS, n // length, FR_MODULUS)
+        key = (int(omega) % FR_MODULUS, n, length)
+        wlen = _WLEN_CACHE.get(key)
+        if wlen is None:
+            wlen = pow(int(omega) % FR_MODULUS, n // length, FR_MODULUS)
+            _WLEN_CACHE[key] = wlen
         for i in range(0, n, length):
             w = 1
             half = length >> 1
