@@ -8,12 +8,23 @@ CPU kernels：将项目内已有的 CPU reference/优化实现封装为 runtime 
 - 若 ctx["pool"] 提供 CPUMemoryPool，则尽量复用 FR 的 list[int] 作为输出缓冲
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from pyZKP.common.crypto.field import FR_MODULUS, fr_batch_inv
 from pyZKP.common.crypto.field.fr import fr_inv
-from pyZKP.common.crypto.kzg.cpu_ref import commit as kzg_commit, open_proof as kzg_open
-from pyZKP.common.crypto.msm import msm_naive_g1, msm_naive_g2, msm_pippenger
+from pyZKP.common.crypto.ecc.bn254 import G1_ZERO
+from pyZKP.common.crypto.kzg.cpu_ref import SRS
+from pyZKP.common.crypto.msm import (
+    fixed_base_get_cached,
+    fixed_base_precompute,
+    msm_fixed_base,
+    msm_fixed_base_batch,
+    msm_naive_g1,
+    msm_naive_g2,
+    msm_pippenger,
+    msm_pippenger_batch,
+    msm_pippenger_g2,
+)
 from pyZKP.common.crypto.poly import (
     coeffs_from_evals_on_coset,
     coeffs_from_evals_on_roots,
@@ -22,6 +33,7 @@ from pyZKP.common.crypto.poly import (
     intt_inplace,
     ntt_inplace,
     poly_div_by_xn_minus_1,
+    poly_eval,
     poly_mul_ntt,
 )
 from pyZKP.common.crypto.poly.cpu_ref import poly_sub
@@ -29,6 +41,23 @@ from pyZKP.runtime.ir.ops import OpType
 from pyZKP.runtime.ir.types import Buffer, Device, DType
 from pyZKP.runtime.memory import CPUMemoryPool
 from pyZKP.runtime.kernels.registry import KernelRegistry
+
+
+# 消除无意义的重复切片复制
+# 全局缓存
+_SRS_G1_PREFIX_CACHE: Dict[Tuple[int, int], Tuple[object, Tuple[Any, ...]]] = {}
+
+# 缓存读取函数，接收原始SRS和需要的长度
+def _srs_g1_prefix(s: SRS, n: int):
+    k = (id(s.g1_powers), int(n))
+    cached = _SRS_G1_PREFIX_CACHE.get(k)
+    if cached is not None:
+        ref, out = cached
+        if ref is s.g1_powers:
+            return out
+    out = s.g1_powers[: int(n)]
+    _SRS_G1_PREFIX_CACHE[k] = (s.g1_powers, out)
+    return out
 
 
 # cpu算子注册入口
@@ -48,8 +77,12 @@ def register_cpu_kernels(registry: KernelRegistry) -> None:
     registry.register(OpType.PLONK_T_QUOTIENT_EVALS, Device.CPU, _plonk_t_quotient_evals)
     registry.register(OpType.MSM_G1, Device.CPU, _msm_g1)
     registry.register(OpType.MSM_G2, Device.CPU, _msm_g2)
+    registry.register(OpType.MSM_G1_BATCH, Device.CPU, _msm_g1_batch)
     registry.register(OpType.KZG_COMMIT, Device.CPU, _kzg_commit)
     registry.register(OpType.KZG_OPEN, Device.CPU, _kzg_open)
+    registry.register(OpType.KZG_OPEN_PREP_BATCH, Device.CPU, _kzg_open_prep_batch) # 批量打开证明，只计算 y 和 q, 不计算 pi
+    registry.register(OpType.KZG_BATCH_COMMIT, Device.CPU, _kzg_batch_commit)
+    registry.register(OpType.KZG_BATCH_OPEN, Device.CPU, _kzg_batch_open)
 
 
 def _roots_evals_from_coeffs(ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -211,25 +244,20 @@ def _msm_g1(ctx: Dict[str, Any]) -> Dict[str, Any]:
     points: Buffer = ctx["inputs"][0]
     scalars: Buffer = ctx["inputs"][1]
     out_id = node.outputs[0]
-    threshold = int(ctx["attrs"].get("pippenger_threshold", 1024))
-    if len(points.data) >= threshold:
-        window_bits = int(ctx["attrs"].get("window_bits", 16))
-        acc = msm_pippenger(points.data, scalars.data, window_bits=window_bits)
-    else:
-        acc = msm_naive_g1(points.data, scalars.data)
+    acc = _msm_g1_impl(points.data, scalars.data, ctx["attrs"])
     return {"outputs": {out_id: Buffer(id=out_id, device=points.device, dtype=DType.G1, data=acc)}}
 
 
 def _msm_g2(ctx: Dict[str, Any]) -> Dict[str, Any]:
     """
     G2 MSM（多标量乘）。
-    当前仍用 naive 作为基线实现。
+    默认按规模阈值选择 naive 或 pippenger。
     """
     node = ctx["node"]
     points: Buffer = ctx["inputs"][0]
     scalars: Buffer = ctx["inputs"][1]
     out_id = node.outputs[0]
-    acc = msm_naive_g2(points.data, scalars.data)
+    acc = _msm_g2_impl(points.data, scalars.data, ctx["attrs"])
     return {"outputs": {out_id: Buffer(id=out_id, device=points.device, dtype=DType.G2, data=acc)}}
 
 
@@ -241,7 +269,14 @@ def _kzg_commit(ctx: Dict[str, Any]) -> Dict[str, Any]:
     srs: Buffer = ctx["inputs"][0]
     coeffs: Buffer = ctx["inputs"][1]
     out_id = node.outputs[0]
-    cm = kzg_commit(srs.data, coeffs.data)
+    s: SRS = srs.data
+    scalars = [int(c) % FR_MODULUS for c in coeffs.data]
+    if len(scalars) == 0:
+        cm = G1_ZERO
+    else:
+        if len(scalars) > len(s.g1_powers):
+            raise ValueError("SRS too small for polynomial degree")
+        cm = _msm_g1_impl(_srs_g1_prefix(s, len(scalars)), scalars, ctx["attrs"])
     return {"outputs": {out_id: Buffer(id=out_id, device=coeffs.device, dtype=DType.G1, data=cm)}}
 
 
@@ -255,13 +290,222 @@ def _kzg_open(ctx: Dict[str, Any]) -> Dict[str, Any]:
     z = int(ctx["attrs"]["z"])
     y_id = node.outputs[0]
     pi_id = node.outputs[1]
-    y, pi = kzg_open(srs.data, coeffs.data, z)
+    s: SRS = srs.data
+    zz = int(z) % FR_MODULUS
+    f = [int(c) % FR_MODULUS for c in coeffs.data]
+    y = poly_eval(f, zz) % FR_MODULUS
+    if len(f) == 0:
+        pi = G1_ZERO
+    else:
+        f0 = list(f)
+        f0[0] = (f0[0] - y) % FR_MODULUS
+        q = _synthetic_division(f0, zz)
+        if len(q) == 0:
+            pi = G1_ZERO
+        else:
+            if len(q) > len(s.g1_powers):
+                raise ValueError("SRS too small for quotient degree")
+            pi = _msm_g1_impl(_srs_g1_prefix(s, len(q)), q, ctx["attrs"])
     return {
         "outputs": {
             y_id: Buffer(id=y_id, device=coeffs.device, dtype=DType.FR, data=int(y) % FR_MODULUS),
             pi_id: Buffer(id=pi_id, device=coeffs.device, dtype=DType.G1, data=pi),
         }
     }
+
+def _kzg_open_prep_data(coeffs_list, z_list):
+    if len(coeffs_list) != len(z_list):
+        raise ValueError("length mismatch")
+    ys = []
+    qs = []
+    for coeffs, z in zip(coeffs_list, z_list):
+        zz = int(z) % FR_MODULUS
+        f = [int(c) % FR_MODULUS for c in coeffs]
+        y = poly_eval(f, zz) % FR_MODULUS
+        if len(f) == 0:
+            q = []
+        else:
+            f0 = list(f)
+            f0[0] = (f0[0] - y) % FR_MODULUS
+            q = _synthetic_division(f0, zz)
+        ys.append(int(y) % FR_MODULUS)
+        qs.append(q)
+    return ys, qs
+
+
+def _kzg_open_prep_batch(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    node = ctx["node"]
+    coeffs_list: Buffer = ctx["inputs"][1]
+    z_list: Buffer = ctx["inputs"][2]
+    y_id = node.outputs[0]
+    q_id = node.outputs[1]
+
+    ys, qs = _kzg_open_prep_data(coeffs_list.data, z_list.data)
+
+    srs: Buffer = ctx["inputs"][0]
+    return {
+        "outputs": {
+            y_id: Buffer(id=y_id, device=srs.device, dtype=DType.OBJ, data=ys),
+            q_id: Buffer(id=q_id, device=srs.device, dtype=DType.OBJ, data=qs),
+        }
+    }
+
+
+def _msm_g1_batch(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    node = ctx["node"]
+    points: Buffer = ctx["inputs"][0]
+    scalars_list: Buffer = ctx["inputs"][1]
+    out_id = node.outputs[0]
+    outs = []
+    for scalars in scalars_list.data:
+        s = [int(c) % FR_MODULUS for c in scalars]
+        outs.append(_msm_g1_impl(points.data[: len(s)], s, ctx["attrs"]) if len(s) != 0 else G1_ZERO)
+    return {"outputs": {out_id: Buffer(id=out_id, device=points.device, dtype=DType.OBJ, data=outs)}}
+
+
+def _kzg_batch_commit(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    node = ctx["node"]
+    srs: Buffer = ctx["inputs"][0]
+    polys: Buffer = ctx["inputs"][1]
+    out_id = node.outputs[0]
+    s: SRS = srs.data
+    scalars_list = []
+    max_len = 0
+    for coeffs in polys.data:
+        scalars = [int(c) % FR_MODULUS for c in coeffs]
+        scalars_list.append(scalars)
+        if len(scalars) > max_len:
+            max_len = len(scalars)
+    if max_len > len(s.g1_powers):
+        raise ValueError("SRS too small for polynomial degree")
+
+    threshold = int(ctx["attrs"].get("pippenger_threshold", 64))
+    if len(scalars_list) >= 2 and max_len >= threshold:
+        points = _srs_g1_prefix(s, max_len)
+        fb = ctx["attrs"].get("fixed_base")
+        if fb is True:
+            fb_w = int(ctx["attrs"].get("fixed_base_window_bits", 8))
+            pre = fixed_base_precompute(points, fb_w)
+            outs = msm_fixed_base_batch(pre, scalars_list)
+        elif fb is None and isinstance(points, tuple):
+            fb_w = int(ctx["attrs"].get("fixed_base_window_bits", 8))
+            pre = fixed_base_get_cached(points, fb_w)
+            if pre is not None:
+                outs = msm_fixed_base_batch(pre, scalars_list)
+            else:
+                if "window_bits" in ctx["attrs"]:
+                    window_bits = int(ctx["attrs"]["window_bits"])
+                else:
+                    window_bits = max(4, min(16, int(max_len).bit_length() - 2))
+                outs = msm_pippenger_batch(points, scalars_list, window_bits=window_bits)
+        else:
+            if "window_bits" in ctx["attrs"]:
+                window_bits = int(ctx["attrs"]["window_bits"])
+            else:
+                window_bits = max(4, min(16, int(max_len).bit_length() - 2))
+            outs = msm_pippenger_batch(points, scalars_list, window_bits=window_bits)
+    else:
+        outs = [_msm_g1_impl(_srs_g1_prefix(s, len(sc)), sc, ctx["attrs"]) if len(sc) != 0 else G1_ZERO for sc in scalars_list]
+    return {"outputs": {out_id: Buffer(id=out_id, device=srs.device, dtype=DType.OBJ, data=outs)}}
+
+
+def _kzg_batch_open(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    node = ctx["node"]
+    srs: Buffer = ctx["inputs"][0]
+    coeffs_list: Buffer = ctx["inputs"][1]
+    z_list: Buffer = ctx["inputs"][2]
+    y_id = node.outputs[0]
+    pi_id = node.outputs[1]
+
+    s: SRS = srs.data
+    ys, qs = _kzg_open_prep_data(coeffs_list.data, z_list.data)
+
+    max_len = 0
+    for q in qs:
+        if len(q) > max_len:
+            max_len = len(q)
+    if max_len > len(s.g1_powers):
+        raise ValueError("SRS too small for quotient degree")
+
+    threshold = int(ctx["attrs"].get("pippenger_threshold", 64))
+    if len(qs) >= 2 and max_len >= threshold:
+        points = _srs_g1_prefix(s, max_len)
+        fb = ctx["attrs"].get("fixed_base")
+        if fb is True:
+            fb_w = int(ctx["attrs"].get("fixed_base_window_bits", 8))
+            pre = fixed_base_precompute(points, fb_w)
+            pis = msm_fixed_base_batch(pre, qs)
+        elif fb is None and isinstance(points, tuple):
+            fb_w = int(ctx["attrs"].get("fixed_base_window_bits", 8))
+            pre = fixed_base_get_cached(points, fb_w)
+            if pre is not None:
+                pis = msm_fixed_base_batch(pre, qs)
+            else:
+                if "window_bits" in ctx["attrs"]:
+                    window_bits = int(ctx["attrs"]["window_bits"])
+                else:
+                    window_bits = max(4, min(16, int(max_len).bit_length() - 2))
+                pis = msm_pippenger_batch(points, qs, window_bits=window_bits)
+        else:
+            if "window_bits" in ctx["attrs"]:
+                window_bits = int(ctx["attrs"]["window_bits"])
+            else:
+                window_bits = max(4, min(16, int(max_len).bit_length() - 2))
+            pis = msm_pippenger_batch(points, qs, window_bits=window_bits)
+    else:
+        pis = [_msm_g1_impl(_srs_g1_prefix(s, len(q)), q, ctx["attrs"]) if len(q) != 0 else G1_ZERO for q in qs]
+
+    return {
+        "outputs": {
+            y_id: Buffer(id=y_id, device=srs.device, dtype=DType.OBJ, data=ys),
+            pi_id: Buffer(id=pi_id, device=srs.device, dtype=DType.OBJ, data=pis),
+        }
+    }
+
+
+def _msm_g1_impl(points, scalars, attrs: Dict[str, Any]):
+    threshold = int(attrs.get("pippenger_threshold", 64))
+    if len(points) >= threshold:
+        if "window_bits" in attrs:
+            window_bits = int(attrs["window_bits"])
+        else:
+            window_bits = max(4, min(16, int(len(points)).bit_length() - 2))
+        fb = attrs.get("fixed_base")
+        if fb is True and isinstance(points, tuple):
+            fb_w = int(attrs.get("fixed_base_window_bits", min(8, window_bits)))
+            pre = fixed_base_precompute(points, fb_w)
+            return msm_fixed_base(pre, scalars)
+        if fb is None and isinstance(points, tuple):
+            fb_w = int(attrs.get("fixed_base_window_bits", min(8, window_bits)))
+            pre = fixed_base_get_cached(points, fb_w)
+            if pre is not None:
+                return msm_fixed_base(pre, scalars)
+        return msm_pippenger(points, scalars, window_bits=window_bits)
+    return msm_naive_g1(points, scalars)
+
+
+def _msm_g2_impl(points, scalars, attrs: Dict[str, Any]):
+    threshold = int(attrs.get("pippenger_threshold", 64))
+    if len(points) >= threshold:
+        if "window_bits" in attrs:
+            window_bits = int(attrs["window_bits"])
+        else:
+            window_bits = max(4, min(16, int(len(points)).bit_length() - 2))
+        return msm_pippenger_g2(points, scalars, window_bits=window_bits)
+    return msm_naive_g2(points, scalars)
+
+
+def _synthetic_division(coeffs: List[int], z: int) -> List[int]:
+    if len(coeffs) <= 1:
+        return []
+    z = int(z) % FR_MODULUS
+    out = [0] * (len(coeffs) - 1)
+    acc = coeffs[-1] % FR_MODULUS
+    out[-1] = acc
+    for i in range(len(coeffs) - 2, 0, -1):
+        acc = (coeffs[i] + acc * z) % FR_MODULUS
+        out[i - 1] = acc
+    return out
 
 
 def _alloc_fr(pool: CPUMemoryPool | None, n: int) -> List[int]:

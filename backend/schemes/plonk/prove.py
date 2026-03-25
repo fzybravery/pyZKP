@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from typing import Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 from pyZKP.backend.schemes.plonk.transcript import Transcript
 from pyZKP.backend.schemes.plonk.types import Proof, ProvingKey
@@ -35,6 +35,7 @@ def prove(
     *,
     runtime_trace=None,
     runtime_pool=None,
+    runtime_attrs: Dict[str, Any] | None = None,
 ) -> Proof:
     c = pk.circuit
     n = c.domain.n
@@ -61,20 +62,18 @@ def prove(
     exe = Executor(registry=reg)
     pool = runtime_pool
     trace = runtime_trace
+    attrs0: Dict[str, Any] = dict(runtime_attrs or {})
+    from pyZKP.runtime.warmup import apply_fixed_base_policy_plonk
+
+    attrs0 = apply_fixed_base_policy_plonk(pk, attrs0)
 
     # 生成 A, B, C 的 KZG 证明
     g0 = Graph()
     g0.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
-    g0.add_buffer(id="a_coeff", device=Device.CPU, dtype=DType.FR, data=list(a_coeff))
-    g0.add_buffer(id="b_coeff", device=Device.CPU, dtype=DType.FR, data=list(b_coeff))
-    g0.add_buffer(id="c_coeff", device=Device.CPU, dtype=DType.FR, data=list(c_coeff))
-    g0.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "a_coeff"], outputs=["cm_a"])
-    g0.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "b_coeff"], outputs=["cm_b"])
-    g0.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "c_coeff"], outputs=["cm_c"])
-    exe.run(g0, pool=pool, trace=trace, keep=["cm_a", "cm_b", "cm_c"])
-    cm_a = g0.buffers["cm_a"].data
-    cm_b = g0.buffers["cm_b"].data
-    cm_c = g0.buffers["cm_c"].data
+    g0.add_buffer(id="abc_coeffs", device=Device.CPU, dtype=DType.OBJ, data=[list(a_coeff), list(b_coeff), list(c_coeff)])
+    g0.add_node(op=OpType.KZG_BATCH_COMMIT, inputs=["srs", "abc_coeffs"], outputs=["abc_cms"], attrs=attrs0)
+    exe.run(g0, pool=pool, trace=trace, keep=["abc_cms"])
+    cm_a, cm_b, cm_c = g0.buffers["abc_cms"].data
 
     pi_eval = [0] * n
     for i, pv in enumerate(public_values[1:]):
@@ -106,10 +105,10 @@ def prove(
     z_coeff = tuple(coeffs_from_evals_on_roots(z_eval, omega=omega))
     gz = Graph()
     gz.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
-    gz.add_buffer(id="z_coeff", device=Device.CPU, dtype=DType.FR, data=list(z_coeff))
-    gz.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "z_coeff"], outputs=["cm_z"])
-    exe.run(gz, pool=pool, trace=trace, keep=["cm_z"])
-    cm_z = gz.buffers["cm_z"].data
+    gz.add_buffer(id="z_coeffs", device=Device.CPU, dtype=DType.OBJ, data=[list(z_coeff)])
+    gz.add_node(op=OpType.KZG_BATCH_COMMIT, inputs=["srs", "z_coeffs"], outputs=["z_cms"], attrs=attrs0)
+    exe.run(gz, pool=pool, trace=trace, keep=["z_cms"])
+    cm_z = gz.buffers["z_cms"].data[0]
 
     # 生成 alpha
     tr.absorb_g1(cm_z)
@@ -132,16 +131,10 @@ def prove(
     )
     gt = Graph()
     gt.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
-    gt.add_buffer(id="t1_coeff", device=Device.CPU, dtype=DType.FR, data=list(t1_coeff))
-    gt.add_buffer(id="t2_coeff", device=Device.CPU, dtype=DType.FR, data=list(t2_coeff))
-    gt.add_buffer(id="t3_coeff", device=Device.CPU, dtype=DType.FR, data=list(t3_coeff))
-    gt.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "t1_coeff"], outputs=["cm_t1"])
-    gt.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "t2_coeff"], outputs=["cm_t2"])
-    gt.add_node(op=OpType.KZG_COMMIT, inputs=["srs", "t3_coeff"], outputs=["cm_t3"])
-    exe.run(gt, pool=pool, trace=trace, keep=["cm_t1", "cm_t2", "cm_t3"])
-    cm_t1 = gt.buffers["cm_t1"].data
-    cm_t2 = gt.buffers["cm_t2"].data
-    cm_t3 = gt.buffers["cm_t3"].data
+    gt.add_buffer(id="t_coeffs", device=Device.CPU, dtype=DType.OBJ, data=[list(t1_coeff), list(t2_coeff), list(t3_coeff)])
+    gt.add_node(op=OpType.KZG_BATCH_COMMIT, inputs=["srs", "t_coeffs"], outputs=["t_cms"], attrs=attrs0)
+    exe.run(gt, pool=pool, trace=trace, keep=["t_cms"])
+    cm_t1, cm_t2, cm_t3 = gt.buffers["t_cms"].data
 
     # 生成 zeta
     tr.absorb_g1(cm_t1)
@@ -195,20 +188,17 @@ def prove(
     # 生成 KZG 证明
     go = Graph()
     go.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
-    go.add_buffer(id="combined_coeff", device=Device.CPU, dtype=DType.FR, data=list(combined_coeff))
-    go.add_node(op=OpType.KZG_OPEN, inputs=["srs", "combined_coeff"], outputs=["y_check", "pi_zeta"], attrs={"z": int(zeta)})
-    exe.run(go, pool=pool, trace=trace, keep=["y_check", "pi_zeta"])
-    y_check = int(go.buffers["y_check"].data) % FR_MODULUS
-    pi_zeta = go.buffers["pi_zeta"].data
+    go.add_buffer(id="coeffs_list", device=Device.CPU, dtype=DType.OBJ, data=[list(combined_coeff), list(z_coeff)])
+    go.add_buffer(id="z_list", device=Device.CPU, dtype=DType.OBJ, data=[int(zeta), int(zeta_omega)])
+    go.add_node(op=OpType.KZG_OPEN_PREP_BATCH, inputs=["srs", "coeffs_list", "z_list"], outputs=["y_list", "q_list"], attrs=attrs0)
+    go.add_node(op=OpType.KZG_BATCH_COMMIT, inputs=["srs", "q_list"], outputs=["pi_list"], attrs=attrs0)
+    exe.run(go, pool=pool, trace=trace, keep=["y_list", "pi_list"])
+    y_check = int(go.buffers["y_list"].data[0]) % FR_MODULUS
+    pi_zeta = go.buffers["pi_list"].data[0]
     if y_check % FR_MODULUS != combined_y % FR_MODULUS:
         raise ValueError("batch opening mismatch")
 
-    go2 = Graph()
-    go2.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
-    go2.add_buffer(id="z_coeff", device=Device.CPU, dtype=DType.FR, data=list(z_coeff))
-    go2.add_node(op=OpType.KZG_OPEN, inputs=["srs", "z_coeff"], outputs=["z_y", "pi_zeta_omega"], attrs={"z": int(zeta_omega)})
-    exe.run(go2, pool=pool, trace=trace, keep=["pi_zeta_omega"])
-    pi_zeta_omega = go2.buffers["pi_zeta_omega"].data
+    pi_zeta_omega = go.buffers["pi_list"].data[1]
 
     return Proof(
         cm_a=cm_a,

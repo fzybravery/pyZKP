@@ -44,7 +44,7 @@ class TestPlonkE2E(unittest.TestCase):
         check_r1cs(ir, wit)
 
         pk = setup(ir)
-        prf = prove(pk, wit, public_values=[1, y])
+        prf = prove(pk, wit, public_values=[1, y], runtime_attrs={"fixed_base_policy": "auto"})
         ok = verify(pk.vk, prf, public_values=[1, y])
         self.assertTrue(ok)
 

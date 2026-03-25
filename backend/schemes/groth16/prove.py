@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import Any, Dict, List
 
 from pyZKP.backend.schemes.groth16.qap import compute_h_from_abc_on_roots
 from pyZKP.backend.schemes.groth16.r1cs import compile_r1cs, eval_r1cs_vectors
@@ -27,7 +27,15 @@ from pyZKP.runtime.kernels.cpu import register_cpu_kernels
     该实现利用 Graph 和 Executor 将底层的多标量乘法 (MSM) 任务抽象为计算图节点，
     实现了前端逻辑与底层硬件执行的解耦，为后续的 GPU 加速铺平了道路。
 """
-def prove(ir: CircuitIR, pk: ProvingKey, witness: Witness, *, runtime_trace=None, runtime_pool=None) -> Proof:
+def prove(
+    ir: CircuitIR,
+    pk: ProvingKey,
+    witness: Witness,
+    *,
+    runtime_trace=None,
+    runtime_pool=None,
+    runtime_attrs: Dict[str, Any] | None = None,
+) -> Proof:
     # 编译 R1CS 约束
     r1cs = compile_r1cs(ir)
     n = r1cs.n_constraints
@@ -43,18 +51,24 @@ def prove(ir: CircuitIR, pk: ProvingKey, witness: Witness, *, runtime_trace=None
     reg = KernelRegistry()
     register_cpu_kernels(reg)
     exe = Executor(registry=reg)
+    attrs0: Dict[str, Any] = dict(runtime_attrs or {})
+    from pyZKP.runtime.warmup import apply_fixed_base_policy_groth16
+
+    attrs0 = apply_fixed_base_policy_groth16(pk, attrs0)
     g = Graph()
 
     # 将数据存储到runtime缓冲区中
     g.add_buffer(id="w", device=Device.CPU, dtype=DType.FR, data=w)
-    g.add_buffer(id="a_query", device=Device.CPU, dtype=DType.G1, data=list(pk.a_query))
+    from pyZKP.runtime.warmup import cached_points_tuple
+
+    g.add_buffer(id="a_query", device=Device.CPU, dtype=DType.G1, data=cached_points_tuple(pk.a_query))
     g.add_buffer(id="b_query_g2", device=Device.CPU, dtype=DType.G2, data=list(pk.b_query_g2))
-    g.add_buffer(id="b_query_g1", device=Device.CPU, dtype=DType.G1, data=list(pk.b_query_g1))
+    g.add_buffer(id="b_query_g1", device=Device.CPU, dtype=DType.G1, data=cached_points_tuple(pk.b_query_g1))
 
     # 添加计算节点
-    g.add_node(op=OpType.MSM_G1, inputs=["a_query", "w"], outputs=["a_lin"])
-    g.add_node(op=OpType.MSM_G2, inputs=["b_query_g2", "w"], outputs=["b_lin_g2"])
-    g.add_node(op=OpType.MSM_G1, inputs=["b_query_g1", "w"], outputs=["b_lin_g1"])
+    g.add_node(op=OpType.MSM_G1, inputs=["a_query", "w"], outputs=["a_lin"], attrs=attrs0)
+    g.add_node(op=OpType.MSM_G2, inputs=["b_query_g2", "w"], outputs=["b_lin_g2"], attrs=attrs0)
+    g.add_node(op=OpType.MSM_G1, inputs=["b_query_g1", "w"], outputs=["b_lin_g1"], attrs=attrs0)
 
     r = fr_rand(nonzero=True)
     s = fr_rand(nonzero=True)
@@ -80,14 +94,14 @@ def prove(ir: CircuitIR, pk: ProvingKey, witness: Witness, *, runtime_trace=None
     aux_scalars = [w[i] for i in pk.aux_ids]
 
     g2 = Graph()
-    g2.add_buffer(id="h_query", device=Device.CPU, dtype=DType.G1, data=list(pk.h_query))
+    g2.add_buffer(id="h_query", device=Device.CPU, dtype=DType.G1, data=cached_points_tuple(pk.h_query))
     g2.add_buffer(id="h_scalars", device=Device.CPU, dtype=DType.FR, data=h_coeffs)
-    g2.add_node(op=OpType.MSM_G1, inputs=["h_query", "h_scalars"], outputs=["h_acc"])
+    g2.add_node(op=OpType.MSM_G1, inputs=["h_query", "h_scalars"], outputs=["h_acc"], attrs=attrs0)
 
     if len(pk.l_query) != 0:
-        g2.add_buffer(id="l_query", device=Device.CPU, dtype=DType.G1, data=list(pk.l_query))
+        g2.add_buffer(id="l_query", device=Device.CPU, dtype=DType.G1, data=cached_points_tuple(pk.l_query))
         g2.add_buffer(id="l_scalars", device=Device.CPU, dtype=DType.FR, data=aux_scalars)
-        g2.add_node(op=OpType.MSM_G1, inputs=["l_query", "l_scalars"], outputs=["l_acc"])
+        g2.add_node(op=OpType.MSM_G1, inputs=["l_query", "l_scalars"], outputs=["l_acc"], attrs=attrs0)
 
     exe.run(g2, pool=runtime_pool, trace=runtime_trace, keep=["h_acc", "l_acc"])
     h_acc: G1 = g2.buffers["h_acc"].data

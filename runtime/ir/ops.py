@@ -16,5 +16,9 @@ class OpType(str, Enum):
     PLONK_T_QUOTIENT_EVALS = "plonk_t_quotient_evals" # PLONK quotient 的“点值域融合算子”
     MSM_G1 = "msm_g1"
     MSM_G2 = "msm_g2"
+    MSM_G1_BATCH = "msm_g1_batch"
     KZG_COMMIT = "kzg_commit"
     KZG_OPEN = "kzg_open"
+    KZG_OPEN_PREP_BATCH = "kzg_open_prep_batch"
+    KZG_BATCH_COMMIT = "kzg_batch_commit"
+    KZG_BATCH_OPEN = "kzg_batch_open"

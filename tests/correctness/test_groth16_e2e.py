@@ -48,7 +48,7 @@ class TestGroth16E2E(unittest.TestCase):
         check_r1cs(ir, wit)
 
         pk = setup(ir)
-        prf = prove(ir, pk, wit)
+        prf = prove(ir, pk, wit, runtime_attrs={"fixed_base_policy": "auto", "fixed_base_auto_groth16_min_calls": 1})
         ok = verify(pk.vk, [1, y], prf)
         self.assertTrue(ok)
 
