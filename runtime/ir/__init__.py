@@ -1,6 +1,5 @@
 from .graph import Graph, Node
 from .ops import OpType
-from .types import Buffer, Device, DType
+from .types import Backend, Buffer, Device, DType
 
-__all__ = ["Buffer", "Device", "DType", "Graph", "Node", "OpType"]
-
+__all__ = ["Backend", "Buffer", "Device", "DType", "Graph", "Node", "OpType"]

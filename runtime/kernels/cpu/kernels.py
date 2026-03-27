@@ -38,7 +38,7 @@ from pyZKP.common.crypto.poly import (
 )
 from pyZKP.common.crypto.poly.cpu_ref import poly_sub
 from pyZKP.runtime.ir.ops import OpType
-from pyZKP.runtime.ir.types import Buffer, Device, DType
+from pyZKP.runtime.ir.types import Backend, Buffer, Device, DType
 from pyZKP.runtime.memory import CPUMemoryPool
 from pyZKP.runtime.kernels.registry import KernelRegistry
 
@@ -61,28 +61,28 @@ def _srs_g1_prefix(s: SRS, n: int):
 
 
 # cpu算子注册入口
-def register_cpu_kernels(registry: KernelRegistry) -> None:
+def register_cpu_kernels(registry: KernelRegistry, *, backend: Backend = Backend.CPU) -> None:
     """
-    注册所有 CPU 侧算子实现。
+    注册所有 CPU 侧算子实现。可控制 backend。
     """
-    registry.register(OpType.ROOTS_EVALS_FROM_COEFFS, Device.CPU, _roots_evals_from_coeffs)
-    registry.register(OpType.ROOTS_COEFFS_FROM_EVALS, Device.CPU, _roots_coeffs_from_evals)
-    registry.register(OpType.COSET_EVALS_FROM_COEFFS, Device.CPU, _coset_evals_from_coeffs)
-    registry.register(OpType.COSET_COEFFS_FROM_EVALS, Device.CPU, _coset_coeffs_from_evals)
-    registry.register(OpType.BATCH_INV, Device.CPU, _batch_inv)
-    registry.register(OpType.POINTWISE_MUL, Device.CPU, _pointwise_mul)
-    registry.register(OpType.POLY_MUL_NTT, Device.CPU, _poly_mul_ntt)
-    registry.register(OpType.POLY_SUB, Device.CPU, _poly_sub)
-    registry.register(OpType.DIV_XN_MINUS_1, Device.CPU, _div_xn_minus_1)
-    registry.register(OpType.PLONK_T_QUOTIENT_EVALS, Device.CPU, _plonk_t_quotient_evals)
-    registry.register(OpType.MSM_G1, Device.CPU, _msm_g1)
-    registry.register(OpType.MSM_G2, Device.CPU, _msm_g2)
-    registry.register(OpType.MSM_G1_BATCH, Device.CPU, _msm_g1_batch)
-    registry.register(OpType.KZG_COMMIT, Device.CPU, _kzg_commit)
-    registry.register(OpType.KZG_OPEN, Device.CPU, _kzg_open)
-    registry.register(OpType.KZG_OPEN_PREP_BATCH, Device.CPU, _kzg_open_prep_batch) # 批量打开证明，只计算 y 和 q, 不计算 pi
-    registry.register(OpType.KZG_BATCH_COMMIT, Device.CPU, _kzg_batch_commit)
-    registry.register(OpType.KZG_BATCH_OPEN, Device.CPU, _kzg_batch_open)
+    registry.register(OpType.ROOTS_EVALS_FROM_COEFFS, Device.CPU, _roots_evals_from_coeffs, backend=backend)
+    registry.register(OpType.ROOTS_COEFFS_FROM_EVALS, Device.CPU, _roots_coeffs_from_evals, backend=backend)
+    registry.register(OpType.COSET_EVALS_FROM_COEFFS, Device.CPU, _coset_evals_from_coeffs, backend=backend)
+    registry.register(OpType.COSET_COEFFS_FROM_EVALS, Device.CPU, _coset_coeffs_from_evals, backend=backend)
+    registry.register(OpType.BATCH_INV, Device.CPU, _batch_inv, backend=backend)
+    registry.register(OpType.POINTWISE_MUL, Device.CPU, _pointwise_mul, backend=backend)
+    registry.register(OpType.POLY_MUL_NTT, Device.CPU, _poly_mul_ntt, backend=backend)
+    registry.register(OpType.POLY_SUB, Device.CPU, _poly_sub, backend=backend)
+    registry.register(OpType.DIV_XN_MINUS_1, Device.CPU, _div_xn_minus_1, backend=backend)
+    registry.register(OpType.PLONK_T_QUOTIENT_EVALS, Device.CPU, _plonk_t_quotient_evals, backend=backend)
+    registry.register(OpType.MSM_G1, Device.CPU, _msm_g1, backend=backend)
+    registry.register(OpType.MSM_G2, Device.CPU, _msm_g2, backend=backend)
+    registry.register(OpType.MSM_G1_BATCH, Device.CPU, _msm_g1_batch, backend=backend)
+    registry.register(OpType.KZG_COMMIT, Device.CPU, _kzg_commit, backend=backend)
+    registry.register(OpType.KZG_OPEN, Device.CPU, _kzg_open, backend=backend)
+    registry.register(OpType.KZG_OPEN_PREP_BATCH, Device.CPU, _kzg_open_prep_batch, backend=backend)
+    registry.register(OpType.KZG_BATCH_COMMIT, Device.CPU, _kzg_batch_commit, backend=backend)
+    registry.register(OpType.KZG_BATCH_OPEN, Device.CPU, _kzg_batch_open, backend=backend)
 
 
 def _roots_evals_from_coeffs(ctx: Dict[str, Any]) -> Dict[str, Any]:

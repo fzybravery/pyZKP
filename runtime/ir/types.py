@@ -8,6 +8,11 @@ from typing import Any, Dict, Optional
 class Device(str, Enum):
     CPU = "cpu"
 
+# 后端类型
+class Backend(str, Enum):
+    CPU = "cpu"
+    METAL = "metal"
+
 # 缓冲区中存储的数据类型
 class DType(str, Enum):
     FR = "fr"

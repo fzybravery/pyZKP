@@ -14,8 +14,8 @@ from pyZKP.common.crypto.poly import (
     poly_eval,
 )
 from pyZKP.frontend.api.witness import Witness
-from pyZKP.runtime import Executor, KernelRegistry
-from pyZKP.runtime.ir import Device, DType, Graph, OpType
+from pyZKP.runtime import Executor, KernelRegistry, RuntimeConfig
+from pyZKP.runtime.ir import Backend, Device, DType, Graph, OpType
 from pyZKP.runtime.kernels.cpu import register_cpu_kernels
 
 
@@ -35,6 +35,8 @@ def prove(
     *,
     runtime_trace=None,
     runtime_pool=None,
+    runtime_context=None,
+    runtime_config: RuntimeConfig | None = None,
     runtime_attrs: Dict[str, Any] | None = None,
 ) -> Proof:
     c = pk.circuit
@@ -58,11 +60,15 @@ def prove(
     c_coeff = tuple(coeffs_from_evals_on_roots(c_eval, omega=omega))
 
     reg = KernelRegistry()
-    register_cpu_kernels(reg)
+    backend0 = runtime_config.backend if runtime_config is not None else Backend.CPU
+    if runtime_context is not None:
+        backend0 = runtime_context.backend
+    register_cpu_kernels(reg, backend=backend0)
     exe = Executor(registry=reg)
     pool = runtime_pool
     trace = runtime_trace
-    attrs0: Dict[str, Any] = dict(runtime_attrs or {})
+    ctx0 = runtime_config.make_context(pool=pool, context=runtime_context) if runtime_config is not None else runtime_context
+    attrs0: Dict[str, Any] = runtime_config.with_overrides(runtime_attrs) if runtime_config is not None else dict(runtime_attrs or {})
     from pyZKP.runtime.warmup import apply_fixed_base_policy_plonk
 
     attrs0 = apply_fixed_base_policy_plonk(pk, attrs0)
@@ -72,7 +78,7 @@ def prove(
     g0.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
     g0.add_buffer(id="abc_coeffs", device=Device.CPU, dtype=DType.OBJ, data=[list(a_coeff), list(b_coeff), list(c_coeff)])
     g0.add_node(op=OpType.KZG_BATCH_COMMIT, inputs=["srs", "abc_coeffs"], outputs=["abc_cms"], attrs=attrs0)
-    exe.run(g0, pool=pool, trace=trace, keep=["abc_cms"])
+    exe.run(g0, pool=pool, trace=trace, keep=["abc_cms"], context=ctx0)
     cm_a, cm_b, cm_c = g0.buffers["abc_cms"].data
 
     pi_eval = [0] * n
@@ -107,7 +113,7 @@ def prove(
     gz.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
     gz.add_buffer(id="z_coeffs", device=Device.CPU, dtype=DType.OBJ, data=[list(z_coeff)])
     gz.add_node(op=OpType.KZG_BATCH_COMMIT, inputs=["srs", "z_coeffs"], outputs=["z_cms"], attrs=attrs0)
-    exe.run(gz, pool=pool, trace=trace, keep=["z_cms"])
+    exe.run(gz, pool=pool, trace=trace, keep=["z_cms"], context=ctx0)
     cm_z = gz.buffers["z_cms"].data[0]
 
     # 生成 alpha
@@ -128,12 +134,14 @@ def prove(
         gamma=gamma,
         runtime_trace=runtime_trace,
         runtime_pool=runtime_pool,
+        runtime_context=ctx0,
+        runtime_config=runtime_config,
     )
     gt = Graph()
     gt.add_buffer(id="srs", device=Device.CPU, dtype=DType.OBJ, data=pk.srs)
     gt.add_buffer(id="t_coeffs", device=Device.CPU, dtype=DType.OBJ, data=[list(t1_coeff), list(t2_coeff), list(t3_coeff)])
     gt.add_node(op=OpType.KZG_BATCH_COMMIT, inputs=["srs", "t_coeffs"], outputs=["t_cms"], attrs=attrs0)
-    exe.run(gt, pool=pool, trace=trace, keep=["t_cms"])
+    exe.run(gt, pool=pool, trace=trace, keep=["t_cms"], context=ctx0)
     cm_t1, cm_t2, cm_t3 = gt.buffers["t_cms"].data
 
     # 生成 zeta
@@ -192,7 +200,7 @@ def prove(
     go.add_buffer(id="z_list", device=Device.CPU, dtype=DType.OBJ, data=[int(zeta), int(zeta_omega)])
     go.add_node(op=OpType.KZG_OPEN_PREP_BATCH, inputs=["srs", "coeffs_list", "z_list"], outputs=["y_list", "q_list"], attrs=attrs0)
     go.add_node(op=OpType.KZG_BATCH_COMMIT, inputs=["srs", "q_list"], outputs=["pi_list"], attrs=attrs0)
-    exe.run(go, pool=pool, trace=trace, keep=["y_list", "pi_list"])
+    exe.run(go, pool=pool, trace=trace, keep=["y_list", "pi_list"], context=ctx0)
     y_check = int(go.buffers["y_list"].data[0]) % FR_MODULUS
     pi_zeta = go.buffers["pi_list"].data[0]
     if y_check % FR_MODULUS != combined_y % FR_MODULUS:
@@ -298,6 +306,8 @@ def _compute_quotient_t_parts(
     gamma: int,
     runtime_trace=None,
     runtime_pool=None,
+    runtime_context=None,
+    runtime_config: RuntimeConfig | None = None,
 ) -> Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]:
     c = pk.circuit
     n = c.domain.n
@@ -318,7 +328,10 @@ def _compute_quotient_t_parts(
     l1_coeff = coeffs_from_evals_on_roots(l1_eval, omega=omega)
 
     reg = KernelRegistry()
-    register_cpu_kernels(reg)
+    backend0 = runtime_config.backend if runtime_config is not None else Backend.CPU
+    if runtime_context is not None:
+        backend0 = runtime_context.backend
+    register_cpu_kernels(reg, backend=backend0)
     exe = Executor(registry=reg)
     g = Graph()
 
@@ -400,7 +413,8 @@ def _compute_quotient_t_parts(
     g.add_node(op=OpType.POINTWISE_MUL, inputs=["num_ext", "inv_zh_ext"], outputs=["t_ext"])
     g.add_node(op=OpType.COSET_COEFFS_FROM_EVALS, inputs=["t_ext"], outputs=["t_coeff_full"], attrs={"omega": omega_m, "shift": shift})
 
-    exe.run(g, pool=runtime_pool, trace=runtime_trace, keep=["t_coeff_full"])
+    ctx0 = runtime_config.make_context(pool=runtime_pool, context=runtime_context) if runtime_config is not None else runtime_context
+    exe.run(g, pool=runtime_pool, trace=runtime_trace, keep=["t_coeff_full"], context=ctx0)
     t_coeff_full = g.buffers["t_coeff_full"].data
     for v in t_coeff_full[3 * n :]:
         if v % FR_MODULUS != 0:

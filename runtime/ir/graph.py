@@ -40,9 +40,11 @@ class GraphAnalysis:
 
     - producers: 每一个buffer id是由哪个节点产出的
     - topo_order: 拓扑排序后的node执行顺序（这里的标号指的是node在Graph的nodes中的位置索引）
+    - initial: 初始 buffer id（通常是常量、输入或外部对象）
     """
     producers: Dict[str, int]
     topo_order: Tuple[int, ...]
+    initial: Tuple[str, ...]
 
 
 class Graph:
@@ -55,6 +57,10 @@ class Graph:
     def __init__(self) -> None:
         self.buffers: Dict[str, Buffer] = {}
         self.nodes: List[Node] = []
+        self.meta: Dict[str, Any] = {}  # 图元数据，如batch_size、标签、后端hint等
+        self._version: int = 0 # 图结构版本号，只要 add_buffer/add_node 就会增加
+        self._analysis_cache: GraphAnalysis | None = None  # 缓存的分析结果
+        self._analysis_cache_version: int = -1  # 缓存的分析结果版本号
 
     def add_buffer(self, *, id: str, device: Device, dtype: DType, data: Any, meta: Dict[str, Any] | None = None) -> Buffer:
         """
@@ -64,6 +70,8 @@ class Graph:
             raise ValueError(f"buffer already exists: {id}")
         buf = Buffer(id=id, device=device, dtype=dtype, data=data, meta=meta)
         self.buffers[id] = buf
+        self._version += 1
+        self._analysis_cache = None
         return buf
 
     def add_node(self, *, op: OpType, inputs: Sequence[str], outputs: Sequence[str], attrs: Dict[str, Any] | None = None) -> Node:
@@ -74,6 +82,8 @@ class Graph:
         """
         n = Node(op=op, inputs=list(inputs), outputs=list(outputs), attrs=attrs or {})
         self.nodes.append(n)
+        self._version += 1
+        self._analysis_cache = None
         return n
 
     def analyze(self) -> GraphAnalysis:
@@ -123,4 +133,21 @@ class Graph:
         if len(topo) != len(self.nodes):
             raise ValueError("graph has cycle or unresolved dependencies")
 
-        return GraphAnalysis(producers=producers, topo_order=tuple(topo))
+        return GraphAnalysis(producers=producers, topo_order=tuple(topo), initial=tuple(sorted(initial)))
+
+    # 缓存分析结果，批量执行时不再重复 topo sort
+    def analyze_cached(self) -> GraphAnalysis:
+        if self._analysis_cache is not None and self._analysis_cache_version == self._version:
+            return self._analysis_cache
+        a = self.analyze()
+        self._analysis_cache = a
+        self._analysis_cache_version = self._version
+        return a
+
+    # 重置图状态，只保留初始 buffer
+    # 用于在每次证明时重置内存池
+    def reset_to_initial(self, analysis: GraphAnalysis) -> None:
+        keep = set(analysis.initial)
+        for k in list(self.buffers.keys()):
+            if k not in keep:
+                del self.buffers[k]

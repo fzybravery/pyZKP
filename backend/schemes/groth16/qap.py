@@ -15,6 +15,7 @@ from pyZKP.common.crypto.poly import (
     lagrange_interpolate,
 )
 from pyZKP.runtime import Executor, KernelRegistry
+from pyZKP.runtime.config import RuntimeConfig
 from pyZKP.runtime.ir import Device, DType, Graph, OpType
 from pyZKP.runtime.kernels.cpu import register_cpu_kernels
 
@@ -58,11 +59,18 @@ def compute_h_from_abc_on_roots(
     *,
     runtime_trace=None,
     runtime_pool=None,
+    runtime_context=None,
+    runtime_config: RuntimeConfig | None = None,
 ) -> QAPWitnessPolys:
     if not (len(a_eval) == len(b_eval) == len(c_eval) == n):
         raise ValueError("length mismatch")
     reg = KernelRegistry()
-    register_cpu_kernels(reg)
+    from pyZKP.runtime.ir import Backend
+
+    backend0 = runtime_config.backend if runtime_config is not None else Backend.CPU
+    if runtime_context is not None:
+        backend0 = runtime_context.backend
+    register_cpu_kernels(reg, backend=backend0)
     exe = Executor(registry=reg)
     g = Graph()
 
@@ -77,7 +85,8 @@ def compute_h_from_abc_on_roots(
     g.add_node(op=OpType.POLY_SUB, inputs=["ab_coeff", "c_coeff"], outputs=["p_coeff"])
     g.add_node(op=OpType.DIV_XN_MINUS_1, inputs=["p_coeff"], outputs=["h_coeff", "rem"], attrs={"n": n})
 
-    exe.run(g, pool=runtime_pool, trace=runtime_trace, keep=["a_coeff", "b_coeff", "c_coeff", "h_coeff", "rem"])
+    ctx0 = runtime_config.make_context(pool=runtime_pool, context=runtime_context) if runtime_config is not None else runtime_context
+    exe.run(g, pool=runtime_pool, trace=runtime_trace, keep=["a_coeff", "b_coeff", "c_coeff", "h_coeff", "rem"], context=ctx0)
     a_poly = list(g.buffers["a_coeff"].data)
     b_poly = list(g.buffers["b_coeff"].data)
     c_poly = list(g.buffers["c_coeff"].data)

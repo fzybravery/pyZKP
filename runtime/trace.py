@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from pyZKP.runtime.ir.ops import OpType
-from pyZKP.runtime.ir.types import Device
+from pyZKP.runtime.ir.types import Backend, Device
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,7 @@ class TraceEvent:
     """
     op: OpType
     device: Device
+    backend: Backend
     start_ns: int
     end_ns: int
     attrs: Dict[str, Any]
@@ -53,6 +54,44 @@ class Trace:
         for e in self.events:
             k = str(e.op.value)
             acc[k] = acc.get(k, 0) + e.duration_ns
+        return acc
+
+
+    # 对每个op进行统计
+    def summarize_stats_by_op(self) -> Dict[str, Dict[str, Any]]:
+        acc: Dict[str, Dict[str, Any]] = {}
+        for e in self.events:
+            k = str(e.op.value)
+            d = e.duration_ns
+            inp = sum(e.input_sizes)
+            out = sum(e.output_sizes)
+            s = acc.get(k)
+            if s is None:
+                s = {
+                    "count": 0,
+                    "total_ns": 0,
+                    "max_ns": 0,
+                    "total_input_size": 0,
+                    "max_input_size": 0,
+                    "total_output_size": 0,
+                    "max_output_size": 0,
+                }
+                acc[k] = s
+            s["count"] += 1
+            s["total_ns"] += d
+            if d > s["max_ns"]:
+                s["max_ns"] = d
+            s["total_input_size"] += inp
+            if inp > s["max_input_size"]:
+                s["max_input_size"] = inp
+            s["total_output_size"] += out
+            if out > s["max_output_size"]:
+                s["max_output_size"] = out
+        for k, s in acc.items():
+            c = int(s["count"])
+            s["avg_ns"] = int(s["total_ns"]) // c if c else 0
+            s["avg_input_size"] = float(s["total_input_size"]) / c if c else 0.0
+            s["avg_output_size"] = float(s["total_output_size"]) / c if c else 0.0
         return acc
 
     def total_ns(self) -> int:
