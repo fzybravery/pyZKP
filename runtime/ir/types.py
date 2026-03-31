@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 # 设备类型
 class Device(str, Enum):
     CPU = "cpu"
+    METAL = "metal"
 
 # 后端类型
 class Backend(str, Enum):

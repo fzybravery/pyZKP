@@ -71,6 +71,9 @@ def compute_h_from_abc_on_roots(
     if runtime_context is not None:
         backend0 = runtime_context.backend
     register_cpu_kernels(reg, backend=backend0)
+    if backend0 == Backend.METAL:
+        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        register_metal_kernels(reg)
     exe = Executor(registry=reg)
     g = Graph()
 

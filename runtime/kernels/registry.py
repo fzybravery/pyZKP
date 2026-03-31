@@ -44,3 +44,10 @@ class KernelRegistry:
         if key not in self._kernels:
             raise KeyError(f"kernel not found: {op} on {device} ({backend})")
         return self._kernels[key]
+
+    def has(self, op: OpType, device: Device, *, backend: Backend = Backend.CPU) -> bool:
+        """
+        检查是否注册了某个算子实现。
+        """
+        key = (op, device, backend)
+        return key in self._kernels

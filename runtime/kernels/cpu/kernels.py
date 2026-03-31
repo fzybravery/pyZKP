@@ -41,6 +41,13 @@ from pyZKP.runtime.ir.ops import OpType
 from pyZKP.runtime.ir.types import Backend, Buffer, Device, DType
 from pyZKP.runtime.memory import CPUMemoryPool
 from pyZKP.runtime.kernels.registry import KernelRegistry
+from pyZKP.runtime.metal import MetalBuffer
+
+# 蒙哥马利表示法
+_FR_P = int(FR_MODULUS)
+_FR_MASK64 = (1 << 64) - 1
+_FR_R = pow(2, 256, _FR_P)
+_FR_RINV = pow(_FR_R, -1, _FR_P)
 
 
 # 消除无意义的重复切片复制
@@ -65,6 +72,9 @@ def register_cpu_kernels(registry: KernelRegistry, *, backend: Backend = Backend
     """
     注册所有 CPU 侧算子实现。可控制 backend。
     """
+    registry.register(OpType.TO_DEVICE, Device.CPU, _to_device, backend=backend) 
+    registry.register(OpType.FROM_DEVICE, Device.CPU, _from_device, backend=backend)
+    registry.register(OpType.FROM_DEVICE, Device.METAL, _from_device, backend=backend)
     registry.register(OpType.ROOTS_EVALS_FROM_COEFFS, Device.CPU, _roots_evals_from_coeffs, backend=backend)
     registry.register(OpType.ROOTS_COEFFS_FROM_EVALS, Device.CPU, _roots_coeffs_from_evals, backend=backend)
     registry.register(OpType.COSET_EVALS_FROM_COEFFS, Device.CPU, _coset_evals_from_coeffs, backend=backend)
@@ -83,6 +93,70 @@ def register_cpu_kernels(registry: KernelRegistry, *, backend: Backend = Backend
     registry.register(OpType.KZG_OPEN_PREP_BATCH, Device.CPU, _kzg_open_prep_batch, backend=backend)
     registry.register(OpType.KZG_BATCH_COMMIT, Device.CPU, _kzg_batch_commit, backend=backend)
     registry.register(OpType.KZG_BATCH_OPEN, Device.CPU, _kzg_batch_open, backend=backend)
+
+
+def _to_device(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    import array
+
+    node = ctx["node"]
+    inp: Buffer = ctx["inputs"][0]
+    out_id = node.outputs[0]
+    # 目前 to_device 主要处理 FR (标量)
+    if inp.dtype != DType.FR:
+        # 如果是 OBJ/G1/G2 且是 MSM 所需的点，我们暂时允许它透传而不做搬运，由 MSM 内部去 pack 
+        if inp.dtype in (DType.OBJ, DType.G1, DType.G2):
+            return {"outputs": {out_id: Buffer(id=out_id, device=Device.METAL, dtype=inp.dtype, data=inp.data)}}
+        raise ValueError(f"to_device supports FR only, got {inp.dtype}")
+    c = ctx.get("context")
+    if c is None or getattr(c, "metal", None) is None:
+        raise RuntimeError("to_device requires MetalContext with metal runtime")
+    rt = c.metal
+
+    host = [int(x) % _FR_P for x in inp.data]
+    flat: list[int] = []
+    # 对每个域元素进行蒙哥马利表示法转换并且展开为 4 个 64 位整数（拆limbs）
+    for x in host:
+        xm = (x * _FR_R) % _FR_P
+        flat.append(int(xm & _FR_MASK64))
+        flat.append(int((xm >> 64) & _FR_MASK64))
+        flat.append(int((xm >> 128) & _FR_MASK64))
+        flat.append(int((xm >> 192) & _FR_MASK64))
+    arr = array.array("Q", flat)
+    b = arr.tobytes()
+    mtl = rt.device.newBufferWithBytes_length_options_(b, len(b), 0)
+    if mtl is None:
+        raise RuntimeError("failed to create MTLBuffer")
+    mb = MetalBuffer(dtype="fr_mont_u64x4", n=len(host), mtl_buffer=mtl)
+    out = Buffer(id=out_id, device=Device.METAL, dtype=inp.dtype, data=mb, meta={"n": len(mb)})
+    return {"outputs": {out_id: out}}
+
+
+def _from_device(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    node = ctx["node"]
+    inp: Buffer = ctx["inputs"][0]
+    out_id = node.outputs[0]
+    if inp.device == Device.CPU:
+        return {"outputs": {out_id: Buffer(id=out_id, device=Device.CPU, dtype=inp.dtype, data=inp.data)}}
+    if inp.dtype != DType.FR:
+        if inp.dtype in (DType.OBJ, DType.G1, DType.G2):
+            return {"outputs": {out_id: Buffer(id=out_id, device=Device.CPU, dtype=inp.dtype, data=inp.data)}}
+        raise ValueError("from_device supports FR only")
+    if not isinstance(inp.data, MetalBuffer):
+        raise ValueError("from_device expects MetalBuffer")
+    mtl = inp.data.mtl_buffer
+    n = int(inp.data.n)
+    ptr = mtl.contents()
+    if ptr is None:
+        raise RuntimeError("failed to map MTLBuffer contents")
+    mv = ptr.as_buffer(n * 32)
+    buf = mv.cast("Q")
+    out_list: list[int] = []
+    # 逐元素拼回蒙哥马利值并且还原为 FR 域元素
+    for i in range(n):
+        v = int(buf[i * 4]) | (int(buf[i * 4 + 1]) << 64) | (int(buf[i * 4 + 2]) << 128) | (int(buf[i * 4 + 3]) << 192)
+        out_list.append(int((v * _FR_RINV) % _FR_P))
+    out = Buffer(id=out_id, device=Device.CPU, dtype=inp.dtype, data=out_list, meta={"n": n})
+    return {"outputs": {out_id: out}}
 
 
 def _roots_evals_from_coeffs(ctx: Dict[str, Any]) -> Dict[str, Any]:

@@ -64,6 +64,9 @@ def prove(
     if runtime_context is not None:
         backend0 = runtime_context.backend
     register_cpu_kernels(reg, backend=backend0)
+    if backend0 == Backend.METAL:
+        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        register_metal_kernels(reg)
     exe = Executor(registry=reg)
     pool = runtime_pool
     trace = runtime_trace
@@ -332,6 +335,9 @@ def _compute_quotient_t_parts(
     if runtime_context is not None:
         backend0 = runtime_context.backend
     register_cpu_kernels(reg, backend=backend0)
+    if backend0 == Backend.METAL:
+        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        register_metal_kernels(reg)
     exe = Executor(registry=reg)
     g = Graph()
 
@@ -411,7 +417,8 @@ def _compute_quotient_t_parts(
     )
     g.add_node(op=OpType.BATCH_INV, inputs=["zh_ext"], outputs=["inv_zh_ext"])
     g.add_node(op=OpType.POINTWISE_MUL, inputs=["num_ext", "inv_zh_ext"], outputs=["t_ext"])
-    g.add_node(op=OpType.COSET_COEFFS_FROM_EVALS, inputs=["t_ext"], outputs=["t_coeff_full"], attrs={"omega": omega_m, "shift": shift})
+    g.add_node(op=OpType.COSET_COEFFS_FROM_EVALS, inputs=["t_ext"], outputs=["t_coeff_full_m"], attrs={"omega": omega_m, "shift": shift})
+    g.add_node(op=OpType.FROM_DEVICE, inputs=["t_coeff_full_m"], outputs=["t_coeff_full"])
 
     ctx0 = runtime_config.make_context(pool=runtime_pool, context=runtime_context) if runtime_config is not None else runtime_context
     exe.run(g, pool=runtime_pool, trace=runtime_trace, keep=["t_coeff_full"], context=ctx0)

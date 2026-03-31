@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from pyZKP.runtime.context import CPUContext, DeviceContext
+from pyZKP.runtime.context import CPUContext, DeviceContext, MetalContext
 from pyZKP.runtime.ir.types import Backend
 
 # 运行时“策略/开关/默认参数集合”，其决定默认策略与默认backend
@@ -43,5 +43,6 @@ class RuntimeConfig:
     def make_context(self, *, pool=None, context: DeviceContext | None = None) -> DeviceContext:
         if context is not None:
             return context
+        if self.backend == Backend.METAL:
+            return MetalContext.create_default(pool=pool)
         return CPUContext(pool=pool, backend=self.backend)
-

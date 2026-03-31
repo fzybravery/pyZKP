@@ -4,6 +4,8 @@ from enum import Enum
 
 # 算子类型
 class OpType(str, Enum):
+    TO_DEVICE = "to_device" # 将数据从 CPU 复制到指定设备
+    FROM_DEVICE = "from_device" # 将数据从指定设备复制到 CPU
     ROOTS_EVALS_FROM_COEFFS = "roots_evals_from_coeffs" # 单位根域上，系数到值的映射
     ROOTS_COEFFS_FROM_EVALS = "roots_coeffs_from_evals" # 单位根域上，值到系数的映射
     COSET_EVALS_FROM_COEFFS = "coset_evals_from_coeffs" # 陪集上，系数到值的映射

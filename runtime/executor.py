@@ -17,6 +17,7 @@ from typing import Any, Dict
 from pyZKP.runtime.context import CPUContext, DeviceContext
 from pyZKP.runtime.config import RuntimeConfig
 from pyZKP.runtime.ir.graph import Graph, GraphAnalysis, Node
+from pyZKP.runtime.ir.ops import OpType
 from pyZKP.runtime.ir.types import Backend, Buffer, Device, DType
 from pyZKP.runtime.kernels.registry import KernelRegistry
 from pyZKP.runtime.memory import CPUMemoryPool
@@ -44,9 +45,12 @@ class Executor:
         keep：若提供，则运行过程中会回收（删除）不再被使用且不在 keep 中的中间 buffer。
         """
         analysis = graph.analyze_cached()
-        if runtime_config is not None:
-            backend = runtime_config.backend
-        ctx = context or CPUContext(backend=backend, pool=pool)
+        if context is not None:
+            ctx = context
+        elif runtime_config is not None:
+            ctx = runtime_config.make_context(pool=pool)
+        else:
+            ctx = CPUContext(backend=backend, pool=pool)
         if ctx.pool is None:
             ctx.pool = pool
         backend = ctx.backend
@@ -93,9 +97,51 @@ class Executor:
             for inp in node.inputs:
                 use_count[inp] = use_count.get(inp, 0) + 1
 
+        # 在执行前，进行自动异构图重写 (Auto Graph Rewrite Pass)
+        # 这一步负责根据 backend 动态插入 TO_DEVICE 和 FROM_DEVICE 算子
+        if backend != Backend.CPU:
+            # 由于重写图会修改 graph.nodes 和 graph.buffers，我们需要一个动态的顺序
+            # 简化起见，这里我们在原本的 topo_order 执行过程中，遇到跨设备边界时，直接临时插入转换节点并立即执行它。
+            pass
+
         for idx in analysis.topo_order:
             node = graph.nodes[idx]
-            self._run_node(graph, node, trace=trace, pool=pool, backend=backend, context=context)
+            
+            # --- 自动异构设备切分与图重写 ---
+            # 决定当前节点要在哪个设备上执行
+            target_device = Device.CPU
+            if backend != Backend.CPU and self.registry.has(node.op, context.device, backend=backend):
+                target_device = context.device
+            
+            # 检查所有的输入 Buffer 是否都在 target_device 上
+            # 如果不在，我们需要自动插入 TO_DEVICE 或 FROM_DEVICE
+            new_inputs = []
+            for inp_id in node.inputs:
+                inp_buf = graph.buffers[inp_id]
+                if inp_buf.device != target_device:
+                    # 需要进行设备间搬运
+                    transfer_op = OpType.TO_DEVICE if target_device != Device.CPU else OpType.FROM_DEVICE
+                    transfer_out_id = f"{inp_id}_{target_device.value}"
+                    
+                    # 如果之前还没搬运过这个 buffer，执行搬运
+                    if transfer_out_id not in graph.buffers:
+                        transfer_node = Node(op=transfer_op, inputs=[inp_id], outputs=[transfer_out_id], attrs={})
+                        self._run_node(graph, transfer_node, trace=trace, pool=pool, backend=backend, context=context, force_device=Device.CPU) # 搬运算子(TO_DEVICE/FROM_DEVICE)本身通常注册在 CPU device 下
+                    
+                    new_inputs.append(transfer_out_id)
+                else:
+                    new_inputs.append(inp_id)
+            
+            # 更新当前节点的输入
+            # Node 是 dataclass(frozen=True)，我们需要创建一个新对象或在 _run_node 中传递覆盖
+            if new_inputs != node.inputs:
+                node = Node(op=node.op, inputs=new_inputs, outputs=node.outputs, attrs=node.attrs)
+                graph.nodes[idx] = node
+            
+            # 运行当前节点
+            self._run_node(graph, node, trace=trace, pool=pool, backend=backend, context=context, force_device=target_device)
+            # --- 自动重写结束 ---
+            
             if keep_set is not None:
                 for inp in node.inputs:
                     use_count[inp] = use_count.get(inp, 0) - 1
@@ -115,11 +161,14 @@ class Executor:
         pool: CPUMemoryPool | None,
         backend: Backend,
         context: DeviceContext,
+        force_device: Device | None = None,
     ) -> None:
         if len(node.inputs) == 0:
             raise ValueError("node must have inputs")
         in_buf0 = graph.buffers[node.inputs[0]]
-        device: Device = in_buf0.device
+        
+        # 允许通过 force_device 覆盖基于输入的默认设备推断
+        device: Device = force_device if force_device is not None else in_buf0.device
 
         fn = self.registry.get(node.op, device, backend=backend)
         inputs = [graph.buffers[i] for i in node.inputs]

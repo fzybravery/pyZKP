@@ -57,6 +57,9 @@ def prove(
     if runtime_context is not None:
         backend0 = runtime_context.backend
     register_cpu_kernels(reg, backend=backend0)
+    if backend0 == Backend.METAL:
+        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        register_metal_kernels(reg)
     exe = Executor(registry=reg)
     attrs0: Dict[str, Any] = runtime_config.with_overrides(runtime_attrs) if runtime_config is not None else dict(runtime_attrs or {})
     from pyZKP.runtime.warmup import apply_fixed_base_policy_groth16
@@ -150,6 +153,9 @@ def prove_batch(
     if runtime_context is not None:
         backend0 = runtime_context.backend
     register_cpu_kernels(reg, backend=backend0)
+    if backend0 == Backend.METAL:
+        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        register_metal_kernels(reg)
     exe = Executor(registry=reg)
     attrs0: Dict[str, Any] = runtime_config.with_overrides(runtime_attrs) if runtime_config is not None else dict(runtime_attrs or {})
     from pyZKP.runtime.warmup import apply_fixed_base_policy_groth16, cached_points_tuple
