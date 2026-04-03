@@ -99,3 +99,69 @@ class Trace:
         所有事件的总耗时（纳秒）。
         """
         return sum(e.duration_ns for e in self.events)
+
+    def clear(self) -> None:
+        self.events.clear()
+
+    def export_chrome_tracing(self, filepath: str) -> None:
+        """
+        导出为 Chrome Tracing (JSON) 格式，可以在 chrome://tracing 或 edge://tracing 中查看
+        """
+        import json
+        import os
+        events = []
+        
+        # 将不同后端映射到不同的 PID (Process ID) 以产生泳道效果
+        pid_map = {
+            "CPU": 1,
+            "METAL": 2
+        }
+        
+        # 添加进程元数据 (进程名称)
+        events.append({
+            "name": "process_name", "ph": "M", "pid": pid_map["CPU"],
+            "args": {"name": "CPU Backend"}
+        })
+        events.append({
+            "name": "process_name", "ph": "M", "pid": pid_map["METAL"],
+            "args": {"name": "Metal Backend"}
+        })
+
+        for trace in self.events:
+            # Chrome Tracing 时间单位是微秒 (microseconds)
+            start_us = trace.start_ns / 1000.0
+            dur_us = trace.duration_ns / 1000.0
+            
+            # 使用大写后端名称获取对应的 PID，如果没有找到默认用 CPU
+            backend_str = str(trace.backend).split('.')[-1].upper()
+            pid = pid_map.get(backend_str, 1)
+            
+            event = {
+                "name": str(trace.op.value),
+                "cat": "Op",
+                "ph": "X",  # Complete event (has duration)
+                "ts": start_us,
+                "dur": dur_us,
+                "pid": pid,
+                "tid": 1,   # 统一在主线程显示
+                "args": {
+                    "backend": str(trace.backend),
+                    "device": str(trace.device),
+                    "input_sizes": trace.input_sizes,
+                    "output_sizes": trace.output_sizes,
+                    **trace.attrs
+                }
+            }
+            events.append(event)
+            
+        # 确保目录存在
+        dir_name = os.path.dirname(filepath)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        
+        with open(filepath, 'w') as f:
+            json.dump({"traceEvents": events, "displayTimeUnit": "ms"}, f, indent=2)
+
+
+# Global tracer instance for use in benchmarks
+tracer = Trace()

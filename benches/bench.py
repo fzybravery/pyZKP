@@ -13,8 +13,8 @@ runtime bench（最小可复现基准）。
 """
 
 import argparse
-import json
 import os
+import json
 import time
 
 from frontend.api import build_witness, check_r1cs, compile_circuit
@@ -29,8 +29,9 @@ from crypto.msm import fixed_base_get_cached, fixed_base_precompute
 from frontend.circuit.schema import public, secret
 from runtime.cache import CacheMismatchError, default_setup_cache_path, load_setup_cache, save_setup_cache
 from runtime.context import CPUContext
+from runtime.trace import tracer
 from runtime.config import RuntimeConfig
-from runtime.ir import Backend
+from runtime.ir.types import Backend
 from runtime.memory import CPUMemoryPool
 from runtime.trace import Trace
 
@@ -196,7 +197,8 @@ def bench_plonk(
             warmup_fixed_base_s = _s(wb1 - wb0)
 
     pool = CPUMemoryPool()
-    trace = Trace()
+    from runtime.trace import tracer
+    tracer.clear()
     ctx = runtime_config.make_context(pool=pool) if runtime_config is not None else CPUContext(pool=pool)
     runtime_attrs = runtime_config.with_overrides(None) if runtime_config is not None else {
         "fixed_base_policy": str(fixed_base_policy),
@@ -207,8 +209,14 @@ def bench_plonk(
     t0 = _ns()
     proofs = []
     for _ in range(batch):
-        proofs.append(plonk_prove(pk, wit, public_values=public_values, runtime_trace=trace, runtime_pool=pool, runtime_context=ctx, runtime_config=runtime_config, runtime_attrs=runtime_attrs))
+        proofs.append(plonk_prove(pk, wit, public_values=public_values, runtime_trace=tracer, runtime_pool=pool, runtime_context=ctx, runtime_config=runtime_config, runtime_attrs=runtime_attrs))
     t1 = _ns()
+    
+    # 导出 Trace
+    config_name = f"plonk_{ctx.backend.value}_fb_{fixed_base_policy}_reuse_{reuse_graph}"
+    trace_path = os.path.join("traces", f"{config_name}.json")
+    tracer.export_chrome_tracing(trace_path)
+    print(f"\n[Trace Exported] Chrome Tracing saved to: {trace_path}\n")
 
     v0 = _ns()
     oks = [plonk_verify(pk.vk, p, public_values=public_values) for p in proofs]
@@ -248,9 +256,9 @@ def bench_plonk(
         "fixed_base_auto_min_points": int(fixed_base_auto_min_points),
         "prove_s": _s(t1 - t0),
         "verify_s": _s(v1 - v0),
-        "trace_total_s": _s(trace.total_ns()),
-        "trace_by_op_s": {k: _s(v) for k, v in trace.summarize_ns_by_op().items()},
-        "trace_by_op_stats": _trace_stats_to_s(trace.summarize_stats_by_op()),
+        "trace_total_s": _s(tracer.total_ns()),
+        "trace_by_op_s": {k: _s(v) for k, v in tracer.summarize_ns_by_op().items()},
+        "trace_by_op_stats": _trace_stats_to_s(tracer.summarize_stats_by_op()),
         "reuse_graph_demo": reuse_graph_demo,
         "pool": {
             "alloc_calls": pool.cpu_stats.alloc_calls,
@@ -347,7 +355,8 @@ def bench_groth16(
     public_values = [1, y]
 
     pool = CPUMemoryPool()
-    trace = Trace()
+    from runtime.trace import tracer
+    tracer.clear()
     ctx = runtime_config.make_context(pool=pool) if runtime_config is not None else CPUContext(pool=pool)
     runtime_attrs = runtime_config.with_overrides(None) if runtime_config is not None else {
         "fixed_base_policy": str(fixed_base_policy),
@@ -362,7 +371,7 @@ def bench_groth16(
             ir,
             pk,
             [wit] * int(batch),
-            runtime_trace=trace,
+            runtime_trace=tracer,
             runtime_pool=pool,
             runtime_context=ctx,
             runtime_config=runtime_config,
@@ -371,8 +380,14 @@ def bench_groth16(
     else:
         proofs = []
         for _ in range(batch):
-            proofs.append(groth16_prove(ir, pk, wit, runtime_trace=trace, runtime_pool=pool, runtime_context=ctx, runtime_config=runtime_config, runtime_attrs=runtime_attrs))
+            proofs.append(groth16_prove(ir, pk, wit, runtime_trace=tracer, runtime_pool=pool, runtime_context=ctx, runtime_config=runtime_config, runtime_attrs=runtime_attrs))
     t1 = _ns()
+    
+    # 导出 Trace
+    config_name = f"groth16_{ctx.backend.value}_fb_{fixed_base_policy}_reuse_{reuse_graph}"
+    trace_path = os.path.join("traces", f"{config_name}.json")
+    tracer.export_chrome_tracing(trace_path)
+    print(f"\n[Trace Exported] Chrome Tracing saved to: {trace_path}\n")
 
     v0 = _ns()
     oks = [groth16_verify(pk.vk, public_values, p) for p in proofs]
@@ -414,9 +429,9 @@ def bench_groth16(
         "reuse_prove_batch": bool(reuse_prove_batch),
         "prove_s": _s(t1 - t0),
         "verify_s": _s(v1 - v0),
-        "trace_total_s": _s(trace.total_ns()),
-        "trace_by_op_s": {k: _s(v) for k, v in trace.summarize_ns_by_op().items()},
-        "trace_by_op_stats": _trace_stats_to_s(trace.summarize_stats_by_op()),
+        "trace_total_s": _s(tracer.total_ns()),
+        "trace_by_op_s": {k: _s(v) for k, v in tracer.summarize_ns_by_op().items()},
+        "trace_by_op_stats": _trace_stats_to_s(tracer.summarize_stats_by_op()),
         "reuse_graph_demo": reuse_graph_demo,
         "pool": {
             "alloc_calls": pool.cpu_stats.alloc_calls,
