@@ -4,7 +4,7 @@ from typing import Any, Iterable, Tuple
 
 from py_ecc import optimized_bn128 as b
 
-from pyZKP.common.crypto.ecc.bn254 import G1, G2
+from common.crypto.ecc.bn254 import G1, G2
 
 
 def pairing_g1_g2(p: G1, q: G2) -> Any:

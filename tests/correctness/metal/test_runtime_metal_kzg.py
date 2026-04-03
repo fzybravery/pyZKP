@@ -1,13 +1,13 @@
 import secrets
 import unittest
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.crypto.kzg.cpu_ref import commit, open_proof, setup_srs
-from pyZKP.runtime import Executor, KernelRegistry, RuntimeConfig
-from pyZKP.runtime.ir import Backend, Device, DType, Graph, OpType
-from pyZKP.runtime.kernels.cpu import register_cpu_kernels
-from pyZKP.runtime.kernels.metal import register_metal_kernels
-from pyZKP.runtime.metal import metal_available
+from common.crypto.field.fr import FR_MODULUS
+from common.crypto.kzg.cpu_ref import commit, open_proof, setup_srs
+from runtime import Executor, KernelRegistry, RuntimeConfig
+from runtime.ir import Backend, Device, DType, Graph, OpType
+from runtime.kernels.cpu import register_cpu_kernels
+from runtime.kernels.metal import register_metal_kernels
+from runtime.metal import metal_available
 
 
 @unittest.skipUnless(metal_available(), "Metal runtime not available")

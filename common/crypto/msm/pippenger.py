@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from pyZKP.common.crypto.ecc.bn254 import G1, G1_ZERO, G2, G2_ZERO, g1_add, g1_mul, g2_add, g2_mul
-from pyZKP.common.crypto.field.fr import FR_MODULUS
+from common.crypto.ecc.bn254 import G1, G1_ZERO, G2, G2_ZERO, g1_add, g1_mul, g2_add, g2_mul
+from common.crypto.field.fr import FR_MODULUS
 
 # Piggenger 多标量乘法的高效实现
 def msm_pippenger(points: Sequence[G1], scalars: Sequence[int], window_bits: int = 16) -> G1:

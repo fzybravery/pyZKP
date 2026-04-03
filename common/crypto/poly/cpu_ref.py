@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Sequence, Tuple
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv
+from common.crypto.field.fr import FR_MODULUS, fr_inv
 
 
 def poly_add(a: Sequence[int], b: Sequence[int]) -> List[int]:

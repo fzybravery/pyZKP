@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import List, Sequence
 
-from pyZKP.backend.schemes.groth16.types import Proof, VerifyingKey
-from pyZKP.common.crypto.ecc.bn254 import G1, G1_ZERO, g1_add, g1_mul
-from pyZKP.common.crypto.pairing import pairing_g1_g2
-from pyZKP.common.crypto.field.fr import FR_MODULUS
+from backend.schemes.groth16.types import Proof, VerifyingKey
+from common.crypto.ecc.bn254 import G1, G1_ZERO, g1_add, g1_mul
+from common.crypto.pairing import pairing_g1_g2
+from common.crypto.field.fr import FR_MODULUS
 
 
 def verify(vk: VerifyingKey, public_values: Sequence[int], proof: Proof) -> bool:

@@ -10,11 +10,11 @@ CPU kernels：将项目内已有的 CPU reference/优化实现封装为 runtime 
 
 from typing import Any, Dict, List, Tuple
 
-from pyZKP.common.crypto.field import FR_MODULUS, fr_batch_inv
-from pyZKP.common.crypto.field.fr import fr_inv
-from pyZKP.common.crypto.ecc.bn254 import G1_ZERO
-from pyZKP.common.crypto.kzg.cpu_ref import SRS
-from pyZKP.common.crypto.msm import (
+from common.crypto.field import FR_MODULUS, fr_batch_inv
+from common.crypto.field.fr import fr_inv
+from common.crypto.ecc.bn254 import G1_ZERO
+from common.crypto.kzg.cpu_ref import SRS
+from common.crypto.msm import (
     fixed_base_get_cached,
     fixed_base_precompute,
     msm_fixed_base,
@@ -25,7 +25,7 @@ from pyZKP.common.crypto.msm import (
     msm_pippenger_batch,
     msm_pippenger_g2,
 )
-from pyZKP.common.crypto.poly import (
+from common.crypto.poly import (
     coeffs_from_evals_on_coset,
     coeffs_from_evals_on_roots,
     evals_from_coeffs_on_coset,
@@ -36,12 +36,12 @@ from pyZKP.common.crypto.poly import (
     poly_eval,
     poly_mul_ntt,
 )
-from pyZKP.common.crypto.poly.cpu_ref import poly_sub
-from pyZKP.runtime.ir.ops import OpType
-from pyZKP.runtime.ir.types import Backend, Buffer, Device, DType
-from pyZKP.runtime.memory import CPUMemoryPool
-from pyZKP.runtime.kernels.registry import KernelRegistry
-from pyZKP.runtime.metal import MetalBuffer
+from common.crypto.poly.cpu_ref import poly_sub
+from runtime.ir.ops import OpType
+from runtime.ir.types import Backend, Buffer, Device, DType
+from runtime.memory import CPUMemoryPool
+from runtime.kernels.registry import KernelRegistry
+from runtime.metal import MetalBuffer
 
 # 蒙哥马利表示法
 _FR_P = int(FR_MODULUS)
@@ -96,8 +96,6 @@ def register_cpu_kernels(registry: KernelRegistry, *, backend: Backend = Backend
 
 
 def _to_device(ctx: Dict[str, Any]) -> Dict[str, Any]:
-    import array
-
     node = ctx["node"]
     inp: Buffer = ctx["inputs"][0]
     out_id = node.outputs[0]
@@ -112,22 +110,37 @@ def _to_device(ctx: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError("to_device requires MetalContext with metal runtime")
     rt = c.metal
 
-    host = [int(x) % _FR_P for x in inp.data]
-    flat: list[int] = []
-    # 对每个域元素进行蒙哥马利表示法转换并且展开为 4 个 64 位整数（拆limbs）
-    for x in host:
-        xm = (x * _FR_R) % _FR_P
-        flat.append(int(xm & _FR_MASK64))
-        flat.append(int((xm >> 64) & _FR_MASK64))
-        flat.append(int((xm >> 128) & _FR_MASK64))
-        flat.append(int((xm >> 192) & _FR_MASK64))
-    arr = array.array("Q", flat)
-    b = arr.tobytes()
-    mtl = rt.device.newBufferWithBytes_length_options_(b, len(b), 0)
+    host = inp.data
+    n = len(host)
+    out_len = n * 32
+    
+    pool = ctx.get("pool")
+    if pool is not None and hasattr(pool, "alloc_metal"):
+        mtl = pool.alloc_metal(rt, out_len)
+    else:
+        # 0 = MTLResourceStorageModeShared, 统一内存架构下 CPU/GPU 零拷贝共享
+        mtl = rt.device.newBufferWithLength_options_(out_len, 0)
+        
     if mtl is None:
         raise RuntimeError("failed to create MTLBuffer")
-    mb = MetalBuffer(dtype="fr_mont_u64x4", n=len(host), mtl_buffer=mtl)
-    out = Buffer(id=out_id, device=Device.METAL, dtype=inp.dtype, data=mb, meta={"n": len(mb)})
+    
+    ptr = mtl.contents()
+    if ptr is None:
+        raise RuntimeError("failed to map MTLBuffer contents")
+    
+    # 零拷贝写入：通过 memoryview 绕过中转数组，直接把 Montgomery 大数写入 Metal 的显存地址
+    mv = ptr.as_buffer(out_len)
+    buf = mv.cast("Q")
+    
+    for i in range(n):
+        xm = (int(host[i]) * _FR_R) % _FR_P
+        buf[i*4] = xm & _FR_MASK64
+        buf[i*4+1] = (xm >> 64) & _FR_MASK64
+        buf[i*4+2] = (xm >> 128) & _FR_MASK64
+        buf[i*4+3] = (xm >> 192) & _FR_MASK64
+
+    mb = MetalBuffer(dtype="fr_mont_u64x4", n=n, mtl_buffer=mtl)
+    out = Buffer(id=out_id, device=Device.METAL, dtype=inp.dtype, data=mb, meta={"n": n})
     return {"outputs": {out_id: out}}
 
 

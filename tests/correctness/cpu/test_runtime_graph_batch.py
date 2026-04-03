@@ -1,8 +1,8 @@
 import unittest
 
-from pyZKP.runtime import Executor, KernelRegistry
-from pyZKP.runtime.ir import Device, DType, Graph, OpType
-from pyZKP.runtime.kernels.cpu import register_cpu_kernels
+from runtime import Executor, KernelRegistry
+from runtime.ir import Device, DType, Graph, OpType
+from runtime.kernels.cpu import register_cpu_kernels
 
 
 class TestRuntimeGraphBatch(unittest.TestCase):

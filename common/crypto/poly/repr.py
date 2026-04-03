@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence, Tuple
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.crypto.poly.cpu_ref import poly_eval
-from pyZKP.common.crypto.poly.ntt import coeffs_from_evals_on_roots, evals_from_coeffs_on_roots
+from common.crypto.field.fr import FR_MODULUS
+from common.crypto.poly.cpu_ref import poly_eval
+from common.crypto.poly.ntt import coeffs_from_evals_on_roots, evals_from_coeffs_on_roots
 
 """
 当前文件将多项式封装为 PolyCoeffs 和 PolyEvals 两个不可变对象

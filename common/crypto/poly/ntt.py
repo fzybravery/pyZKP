@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import List, Sequence, Tuple
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv
+from common.crypto.field.fr import FR_MODULUS, fr_inv
 
 ROOT_2_28 = 19103219067921713944291392827692070036145651957329286315305642004821462161904
 MAX_ORDER_LOG = 28

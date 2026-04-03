@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from pyZKP.common.crypto.ecc.bn254 import G1, G1_ZERO, G2, G2_ZERO, g1_add, g1_mul, g2_add, g2_mul
+from common.crypto.ecc.bn254 import G1, G1_ZERO, G2, G2_ZERO, g1_add, g1_mul, g2_add, g2_mul
 
 # g1 群朴素多标量乘法
 def msm_naive_g1(points: Sequence[G1], scalars: Sequence[int]) -> G1:

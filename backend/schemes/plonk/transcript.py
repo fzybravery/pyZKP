@@ -4,8 +4,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.crypto.ecc.bn254 import G1
+from common.crypto.field.fr import FR_MODULUS
+from common.crypto.ecc.bn254 import G1
 from py_ecc import optimized_bn128 as b
 
 

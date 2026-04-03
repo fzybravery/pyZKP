@@ -1,10 +1,10 @@
 import unittest
 from dataclasses import dataclass
 
-from pyZKP import build_witness, check_r1cs, compile_circuit
-from pyZKP.backend.schemes.groth16 import setup, verify
-from pyZKP.backend.schemes.groth16.prove import prove_batch
-from pyZKP.frontend.circuit.schema import public, secret
+from frontend.api import build_witness, check_r1cs, compile_circuit
+from backend.schemes.groth16 import setup, verify
+from backend.schemes.groth16.prove import prove_batch
+from frontend.circuit.schema import public, secret
 
 
 BN254_FR_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617

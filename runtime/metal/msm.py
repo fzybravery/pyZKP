@@ -2,8 +2,8 @@ import math
 import struct
 import array
 from typing import Any, List, Sequence, Tuple
-from pyZKP.common.crypto.ecc.bn254 import G1, G1_ZERO, g1_add, g1_mul
-from pyZKP.common.crypto.field.fr import FR_MODULUS
+from common.crypto.ecc.bn254 import G1, G1_ZERO, g1_add, g1_mul
+from common.crypto.field.fr import FR_MODULUS
 
 def _fq_to_mont(val: int) -> int:
     P = 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
-from pyZKP.common.crypto.ecc.bn254 import (
+from common.crypto.ecc.bn254 import (
     G1,
     G1_GENERATOR,
     G1_ZERO,
@@ -14,9 +14,9 @@ from pyZKP.common.crypto.ecc.bn254 import (
     g2_add,
     g2_mul,
 )
-from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_rand
-from pyZKP.common.crypto.msm import msm_naive_g1
-from pyZKP.common.crypto.poly import poly_eval
+from common.crypto.field.fr import FR_MODULUS, fr_rand
+from common.crypto.msm import msm_naive_g1
+from common.crypto.poly import poly_eval
 
 
 @dataclass(frozen=True)

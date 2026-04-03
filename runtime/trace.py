@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from pyZKP.runtime.ir.ops import OpType
-from pyZKP.runtime.ir.types import Backend, Device
+from runtime.ir.ops import OpType
+from runtime.ir.types import Backend, Device
 
 
 @dataclass(frozen=True)

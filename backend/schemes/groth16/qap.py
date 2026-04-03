@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.crypto.poly import (
+from common.crypto.field.fr import FR_MODULUS
+from common.crypto.poly import (
     coeffs_from_evals_on_roots,
     poly_div_by_xn_minus_1,
     poly_divmod,
@@ -14,10 +14,10 @@ from pyZKP.common.crypto.poly import (
     poly_vanishing_from_roots,
     lagrange_interpolate,
 )
-from pyZKP.runtime import Executor, KernelRegistry
-from pyZKP.runtime.config import RuntimeConfig
-from pyZKP.runtime.ir import Device, DType, Graph, OpType
-from pyZKP.runtime.kernels.cpu import register_cpu_kernels
+from runtime import Executor, KernelRegistry
+from runtime.config import RuntimeConfig
+from runtime.ir import Device, DType, Graph, OpType
+from runtime.kernels.cpu import register_cpu_kernels
 
 
 @dataclass(frozen=True)
@@ -65,14 +65,14 @@ def compute_h_from_abc_on_roots(
     if not (len(a_eval) == len(b_eval) == len(c_eval) == n):
         raise ValueError("length mismatch")
     reg = KernelRegistry()
-    from pyZKP.runtime.ir import Backend
+    from runtime.ir import Backend
 
     backend0 = runtime_config.backend if runtime_config is not None else Backend.CPU
     if runtime_context is not None:
         backend0 = runtime_context.backend
     register_cpu_kernels(reg, backend=backend0)
     if backend0 == Backend.METAL:
-        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        from runtime.kernels.metal import register_metal_kernels
         register_metal_kernels(reg)
     exe = Executor(registry=reg)
     g = Graph()

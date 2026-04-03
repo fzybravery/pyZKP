@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Sequence, Tuple
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.ir.core import CircuitIR, LinExpr
+from common.crypto.field.fr import FR_MODULUS
+from common.ir.core import CircuitIR, LinExpr
 
 """
 将通用的电路 IR 编译为 Groth16 所需的标准 R1CS 稀疏矩阵格式。

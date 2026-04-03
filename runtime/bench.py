@@ -17,22 +17,22 @@ import json
 import os
 import time
 
-from pyZKP import build_witness, check_r1cs, compile_circuit
-from pyZKP.backend.schemes.groth16.prove import prove as groth16_prove, prove_batch as groth16_prove_batch
-from pyZKP.backend.schemes.groth16.setup import setup as groth16_setup
-from pyZKP.backend.schemes.groth16.verify import verify as groth16_verify
-from pyZKP.backend.schemes.plonk import setup as plonk_setup
-from pyZKP.backend.schemes.plonk.prove import prove as plonk_prove
-from pyZKP.backend.schemes.plonk.verify import verify as plonk_verify
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.crypto.msm import fixed_base_get_cached, fixed_base_precompute
-from pyZKP.frontend.circuit.schema import public, secret
-from pyZKP.runtime.cache import CacheMismatchError, default_setup_cache_path, load_setup_cache, save_setup_cache
-from pyZKP.runtime.context import CPUContext
-from pyZKP.runtime.config import RuntimeConfig
-from pyZKP.runtime.ir import Backend
-from pyZKP.runtime.memory import CPUMemoryPool
-from pyZKP.runtime.trace import Trace
+from frontend.api import build_witness, check_r1cs, compile_circuit
+from backend.schemes.groth16.prove import prove as groth16_prove, prove_batch as groth16_prove_batch
+from backend.schemes.groth16.setup import setup as groth16_setup
+from backend.schemes.groth16.verify import verify as groth16_verify
+from backend.schemes.plonk import setup as plonk_setup
+from backend.schemes.plonk.prove import prove as plonk_prove
+from backend.schemes.plonk.verify import verify as plonk_verify
+from common.crypto.field.fr import FR_MODULUS
+from common.crypto.msm import fixed_base_get_cached, fixed_base_precompute
+from frontend.circuit.schema import public, secret
+from runtime.cache import CacheMismatchError, default_setup_cache_path, load_setup_cache, save_setup_cache
+from runtime.context import CPUContext
+from runtime.config import RuntimeConfig
+from runtime.ir import Backend
+from runtime.memory import CPUMemoryPool
+from runtime.trace import Trace
 
 
 class RepeatMulCircuit:
@@ -166,7 +166,7 @@ def bench_plonk(
     warmup_fixed_base_cached = False
     warmup_fixed_base_points_n = 0
     if warmup_fixed_base:
-        from pyZKP.runtime.kernels.cpu import kernels as cpu_kernels
+        from runtime.kernels.cpu import kernels as cpu_kernels
 
         if warmup_fixed_base_n and int(warmup_fixed_base_n) > 0:
             n_points = int(warmup_fixed_base_n)
@@ -253,9 +253,12 @@ def bench_plonk(
         "trace_by_op_stats": _trace_stats_to_s(trace.summarize_stats_by_op()),
         "reuse_graph_demo": reuse_graph_demo,
         "pool": {
-            "alloc_calls": pool.stats.alloc_calls,
-            "reuse_calls": pool.stats.reuse_calls,
-            "peak_in_use": pool.stats.peak_in_use,
+            "alloc_calls": pool.cpu_stats.alloc_calls,
+            "reuse_calls": pool.cpu_stats.reuse_calls,
+            "peak_in_use": pool.cpu_stats.peak_in_use,
+            "metal_alloc_calls": pool.metal_stats.alloc_calls,
+            "metal_reuse_calls": pool.metal_stats.reuse_calls,
+            "metal_peak_in_use": pool.metal_stats.peak_in_use,
         },
     }
 
@@ -416,19 +419,22 @@ def bench_groth16(
         "trace_by_op_stats": _trace_stats_to_s(trace.summarize_stats_by_op()),
         "reuse_graph_demo": reuse_graph_demo,
         "pool": {
-            "alloc_calls": pool.stats.alloc_calls,
-            "reuse_calls": pool.stats.reuse_calls,
-            "peak_in_use": pool.stats.peak_in_use,
+            "alloc_calls": pool.cpu_stats.alloc_calls,
+            "reuse_calls": pool.cpu_stats.reuse_calls,
+            "peak_in_use": pool.cpu_stats.peak_in_use,
+            "metal_alloc_calls": pool.metal_stats.alloc_calls,
+            "metal_reuse_calls": pool.metal_stats.reuse_calls,
+            "metal_peak_in_use": pool.metal_stats.peak_in_use,
         },
     }
 
 
 def _reuse_graph_demo(*, batch: int, backend) -> dict:
-    from pyZKP.runtime import Executor, KernelRegistry
-    from pyZKP.runtime.ir import Device, DType, Graph, OpType
-    from pyZKP.runtime.kernels.cpu import register_cpu_kernels
-    from pyZKP.runtime.memory import CPUMemoryPool
-    from pyZKP.common.crypto.poly import omega_for_size
+    from runtime import Executor, KernelRegistry
+    from runtime.ir import Device, DType, Graph, OpType
+    from runtime.kernels.cpu import register_cpu_kernels
+    from runtime.memory import CPUMemoryPool
+    from common.crypto.poly import omega_for_size
 
     n = 1024
     omega = omega_for_size(n)
@@ -456,7 +462,14 @@ def _reuse_graph_demo(*, batch: int, backend) -> dict:
         "graph_nodes": int(len(g.nodes)),
         "n": int(n),
         "total_s": _s(t1 - t0),
-        "pool": {"alloc_calls": pool.stats.alloc_calls, "reuse_calls": pool.stats.reuse_calls, "peak_in_use": pool.stats.peak_in_use},
+        "pool": {
+            "alloc_calls": pool.cpu_stats.alloc_calls,
+            "reuse_calls": pool.cpu_stats.reuse_calls,
+            "peak_in_use": pool.cpu_stats.peak_in_use,
+            "metal_alloc_calls": pool.metal_stats.alloc_calls,
+            "metal_reuse_calls": pool.metal_stats.reuse_calls,
+            "metal_peak_in_use": pool.metal_stats.peak_in_use,
+        },
     }
 
 

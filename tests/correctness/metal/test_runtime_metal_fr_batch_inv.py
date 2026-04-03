@@ -1,14 +1,14 @@
 import os
 import unittest
-from pyZKP.runtime.ir.ops import OpType
-from pyZKP.runtime.ir.types import Backend, Device, DType
-from pyZKP.runtime.ir.graph import Graph
-from pyZKP.runtime.kernels.registry import KernelRegistry
-from pyZKP.runtime.executor import Executor
-from pyZKP.runtime.context import CPUContext, MetalContext
-from pyZKP.runtime.memory import CPUMemoryPool
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.runtime.metal.runtime import metal_available
+from runtime.ir.ops import OpType
+from runtime.ir.types import Backend, Device, DType
+from runtime.ir.graph import Graph
+from runtime.kernels.registry import KernelRegistry
+from runtime.executor import Executor
+from runtime.context import CPUContext, MetalContext
+from runtime.memory import CPUMemoryPool
+from common.crypto.field.fr import FR_MODULUS
+from runtime.metal.runtime import metal_available
 
 class TestRuntimeMetalFRBatchInv(unittest.TestCase):
     def setUp(self):
@@ -16,8 +16,8 @@ class TestRuntimeMetalFRBatchInv(unittest.TestCase):
             self.skipTest("Metal is not available on this machine.")
 
     def test_batch_inv_matches_cpu(self):
-        from pyZKP.runtime.kernels.cpu import register_cpu_kernels
-        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        from runtime.kernels.cpu import register_cpu_kernels
+        from runtime.kernels.metal import register_metal_kernels
 
         reg = KernelRegistry()
         register_cpu_kernels(reg, backend=Backend.METAL)
@@ -48,7 +48,7 @@ class TestRuntimeMetalFRBatchInv(unittest.TestCase):
         out_metal = g.buffers["inv_a"].data
         
         # 使用 CPU 参考实现
-        from pyZKP.common.crypto.field.batch import fr_batch_inv
+        from common.crypto.field.batch import fr_batch_inv
         ref_inv = fr_batch_inv(a_data)
 
         self.assertEqual(len(out_metal), len(ref_inv))

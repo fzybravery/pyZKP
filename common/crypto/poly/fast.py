@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Sequence, Tuple
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS
+from common.crypto.field.fr import FR_MODULUS
 
 # 对多项式进行除法，除数为 x^n - 1
 def poly_div_by_xn_minus_1(num: Sequence[int], n: int) -> Tuple[List[int], List[int]]:

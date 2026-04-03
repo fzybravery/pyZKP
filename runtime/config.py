@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from pyZKP.runtime.context import CPUContext, DeviceContext, MetalContext
-from pyZKP.runtime.ir.types import Backend
+from runtime.context import CPUContext, DeviceContext, MetalContext
+from runtime.ir.types import Backend
 
 # 运行时“策略/开关/默认参数集合”，其决定默认策略与默认backend
 @dataclass(frozen=True)

@@ -1,10 +1,10 @@
 import unittest
 
-from pyZKP.runtime import Executor, KernelRegistry, RuntimeConfig
-from pyZKP.runtime.context import CPUContext
-from pyZKP.runtime.ir import Backend, Device, DType, Graph, OpType
-from pyZKP.runtime.kernels.cpu import register_cpu_kernels
-from pyZKP.runtime.trace import Trace
+from runtime import Executor, KernelRegistry, RuntimeConfig
+from runtime.context import CPUContext
+from runtime.ir import Backend, Device, DType, Graph, OpType
+from runtime.kernels.cpu import register_cpu_kernels
+from runtime.trace import Trace
 
 
 class TestRuntimeBackendSwitch(unittest.TestCase):

@@ -3,20 +3,20 @@ from __future__ import annotations
 import secrets
 from typing import Any, Dict, List, Sequence, Tuple
 
-from pyZKP.backend.schemes.plonk.transcript import Transcript
-from pyZKP.backend.schemes.plonk.types import Proof, ProvingKey
-from pyZKP.common.crypto.ecc.bn254 import G1, G1_ZERO, g1_add, g1_mul
-from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv
-from pyZKP.common.crypto.kzg.cpu_ref import commit
-from pyZKP.common.crypto.poly import (
+from backend.schemes.plonk.transcript import Transcript
+from backend.schemes.plonk.types import Proof, ProvingKey
+from common.crypto.ecc.bn254 import G1, G1_ZERO, g1_add, g1_mul
+from common.crypto.field.fr import FR_MODULUS, fr_inv
+from common.crypto.kzg.cpu_ref import commit
+from common.crypto.poly import (
     coeffs_from_evals_on_roots,
     omega_for_size,
     poly_eval,
 )
-from pyZKP.frontend.api.witness import Witness
-from pyZKP.runtime import Executor, KernelRegistry, RuntimeConfig
-from pyZKP.runtime.ir import Backend, Device, DType, Graph, OpType
-from pyZKP.runtime.kernels.cpu import register_cpu_kernels
+from frontend.api.witness import Witness
+from runtime import Executor, KernelRegistry, RuntimeConfig
+from runtime.ir import Backend, Device, DType, Graph, OpType
+from runtime.kernels.cpu import register_cpu_kernels
 
 
 # 核心证明生成函数（Prover）。
@@ -65,14 +65,14 @@ def prove(
         backend0 = runtime_context.backend
     register_cpu_kernels(reg, backend=backend0)
     if backend0 == Backend.METAL:
-        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        from runtime.kernels.metal import register_metal_kernels
         register_metal_kernels(reg)
     exe = Executor(registry=reg)
     pool = runtime_pool
     trace = runtime_trace
     ctx0 = runtime_config.make_context(pool=pool, context=runtime_context) if runtime_config is not None else runtime_context
     attrs0: Dict[str, Any] = runtime_config.with_overrides(runtime_attrs) if runtime_config is not None else dict(runtime_attrs or {})
-    from pyZKP.runtime.warmup import apply_fixed_base_policy_plonk
+    from runtime.warmup import apply_fixed_base_policy_plonk
 
     attrs0 = apply_fixed_base_policy_plonk(pk, attrs0)
 
@@ -336,7 +336,7 @@ def _compute_quotient_t_parts(
         backend0 = runtime_context.backend
     register_cpu_kernels(reg, backend=backend0)
     if backend0 == Backend.METAL:
-        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        from runtime.kernels.metal import register_metal_kernels
         register_metal_kernels(reg)
     exe = Executor(registry=reg)
     g = Graph()

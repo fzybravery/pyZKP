@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pyZKP.common.ir.core import CircuitIR, Field, Visibility
-from pyZKP.frontend.api.api import API, _Builder
-from pyZKP.frontend.circuit.schema import walk_and_allocate_inputs
+from common.ir.core import CircuitIR, Field, Visibility
+from frontend.api.api import API, _Builder
+from frontend.circuit.schema import walk_and_allocate_inputs
 
 # 编译电路，将电路转换为 IR 表示
 def compile_circuit(circuit: Any, field_modulus: int) -> CircuitIR:

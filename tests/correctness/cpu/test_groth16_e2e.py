@@ -1,8 +1,8 @@
 import unittest
 from dataclasses import dataclass
 
-from pyZKP import build_witness, check_r1cs, compile_circuit
-from pyZKP.backend.schemes.groth16 import prove, setup, verify
+from frontend.api import build_witness, check_r1cs, compile_circuit
+from backend.schemes.groth16 import prove, setup, verify
 
 
 BN254_FR_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617
@@ -14,7 +14,7 @@ class CubicCircuit:
     y: object
 
     def __init__(self):
-        from pyZKP.frontend.circuit.schema import public, secret
+        from frontend.circuit.schema import public, secret
 
         self.x = secret("x")
         self.y = public("y")

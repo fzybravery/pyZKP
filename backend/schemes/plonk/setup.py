@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from pyZKP.backend.schemes.plonk.lowering import lower_to_circuit
-from pyZKP.backend.schemes.plonk.types import ProvingKey, VerifyingKey
-from pyZKP.common.crypto.kzg.cpu_ref import commit, setup_srs
-from pyZKP.common.crypto.poly import coeffs_from_evals_on_roots
-from pyZKP.common.ir.core import CircuitIR
+from backend.schemes.plonk.lowering import lower_to_circuit
+from backend.schemes.plonk.types import ProvingKey, VerifyingKey
+from common.crypto.kzg.cpu_ref import commit, setup_srs
+from common.crypto.poly import coeffs_from_evals_on_roots
+from common.ir.core import CircuitIR
 
 
 def setup(ir: CircuitIR) -> ProvingKey:

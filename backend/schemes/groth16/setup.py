@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from pyZKP.backend.schemes.groth16.r1cs import R1CSInstance, compile_r1cs
-from pyZKP.backend.schemes.groth16.types import ProvingKey, VerifyingKey
-from pyZKP.common.crypto.ecc.bn254 import G1, G2, G1_GENERATOR, G2_GENERATOR, g1_mul, g2_mul
-from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv, fr_rand
-from pyZKP.common.crypto.poly import coeffs_from_evals_on_roots, omega_for_size, poly_eval
-from pyZKP.common.ir.core import CircuitIR
+from backend.schemes.groth16.r1cs import R1CSInstance, compile_r1cs
+from backend.schemes.groth16.types import ProvingKey, VerifyingKey
+from common.crypto.ecc.bn254 import G1, G2, G1_GENERATOR, G2_GENERATOR, g1_mul, g2_mul
+from common.crypto.field.fr import FR_MODULUS, fr_inv, fr_rand
+from common.crypto.poly import coeffs_from_evals_on_roots, omega_for_size, poly_eval
+from common.ir.core import CircuitIR
 
 """
 执行 Groth16 的可信设置 (Trusted Setup) 阶段。

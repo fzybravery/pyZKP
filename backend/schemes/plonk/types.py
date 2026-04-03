@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Sequence, Tuple
 
-from pyZKP.common.crypto.ecc.bn254 import G1
+from common.crypto.ecc.bn254 import G1
 
 
 @dataclass(frozen=True)

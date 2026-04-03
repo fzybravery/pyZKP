@@ -1,15 +1,15 @@
 import os
 import unittest
-from pyZKP.runtime.ir.ops import OpType
-from pyZKP.runtime.ir.types import Backend, Device, DType
-from pyZKP.runtime.ir.graph import Graph
-from pyZKP.runtime.kernels.registry import KernelRegistry
-from pyZKP.runtime.executor import Executor
-from pyZKP.runtime.context import MetalContext
-from pyZKP.runtime.memory import CPUMemoryPool
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.crypto.ecc.bn254 import G1_GENERATOR, g1_mul
-from pyZKP.runtime.metal.runtime import metal_available
+from runtime.ir.ops import OpType
+from runtime.ir.types import Backend, Device, DType
+from runtime.ir.graph import Graph
+from runtime.kernels.registry import KernelRegistry
+from runtime.executor import Executor
+from runtime.context import MetalContext
+from runtime.memory import CPUMemoryPool
+from common.crypto.field.fr import FR_MODULUS
+from common.crypto.ecc.bn254 import G1_GENERATOR, g1_mul
+from runtime.metal.runtime import metal_available
 
 class TestRuntimeMetalG1MSM(unittest.TestCase):
     def setUp(self):
@@ -17,8 +17,8 @@ class TestRuntimeMetalG1MSM(unittest.TestCase):
             self.skipTest("Metal is not available on this machine.")
 
     def test_msm_g1_matches_cpu(self):
-        from pyZKP.runtime.kernels.cpu import register_cpu_kernels
-        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        from runtime.kernels.cpu import register_cpu_kernels
+        from runtime.kernels.metal import register_metal_kernels
 
         reg = KernelRegistry()
         register_cpu_kernels(reg, backend=Backend.METAL)
@@ -26,7 +26,7 @@ class TestRuntimeMetalG1MSM(unittest.TestCase):
         exe = Executor(registry=reg)
         pool = CPUMemoryPool()
         # Ensure we create a valid MetalContext with runtime initialized
-        from pyZKP.runtime.config import RuntimeConfig
+        from runtime.config import RuntimeConfig
         rc = RuntimeConfig(backend=Backend.METAL)
         ctx = rc.make_context()
 
@@ -54,7 +54,7 @@ class TestRuntimeMetalG1MSM(unittest.TestCase):
         out_metal = g.buffers["msm_res"].data
         
         # 使用 CPU 参考实现 (Naive 或 Pippenger)
-        from pyZKP.common.crypto.msm.pippenger import msm_pippenger
+        from common.crypto.msm.pippenger import msm_pippenger
         ref_msm = msm_pippenger(points_data, scalars_data)
 
         # 验证仿射坐标是否完全一致

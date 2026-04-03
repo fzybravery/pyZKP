@@ -14,14 +14,14 @@ from dataclasses import dataclass
 import time
 from typing import Any, Dict
 
-from pyZKP.runtime.context import CPUContext, DeviceContext
-from pyZKP.runtime.config import RuntimeConfig
-from pyZKP.runtime.ir.graph import Graph, GraphAnalysis, Node
-from pyZKP.runtime.ir.ops import OpType
-from pyZKP.runtime.ir.types import Backend, Buffer, Device, DType
-from pyZKP.runtime.kernels.registry import KernelRegistry
-from pyZKP.runtime.memory import CPUMemoryPool
-from pyZKP.runtime.trace import Trace, TraceEvent
+from runtime.context import CPUContext, DeviceContext
+from runtime.config import RuntimeConfig
+from runtime.ir.graph import Graph, GraphAnalysis, Node
+from runtime.ir.ops import OpType
+from runtime.ir.types import Backend, Buffer, Device, DType
+from runtime.kernels.registry import KernelRegistry
+from runtime.memory import CPUMemoryPool
+from runtime.trace import Trace, TraceEvent
 
 # 执行器，依赖算子注册表来获取算子具体的执行函数
 @dataclass
@@ -80,6 +80,7 @@ class Executor:
                 before_each(i, graph)
             self._run_with_analysis(graph, analysis, trace=trace, pool=ctx.pool, keep=list(keep0), backend=backend, context=ctx)
 
+    # 采用即时图重写策略
     def _run_with_analysis(
         self,
         graph: Graph,
@@ -96,13 +97,6 @@ class Executor:
         for node in graph.nodes:
             for inp in node.inputs:
                 use_count[inp] = use_count.get(inp, 0) + 1
-
-        # 在执行前，进行自动异构图重写 (Auto Graph Rewrite Pass)
-        # 这一步负责根据 backend 动态插入 TO_DEVICE 和 FROM_DEVICE 算子
-        if backend != Backend.CPU:
-            # 由于重写图会修改 graph.nodes 和 graph.buffers，我们需要一个动态的顺序
-            # 简化起见，这里我们在原本的 topo_order 执行过程中，遇到跨设备边界时，直接临时插入转换节点并立即执行它。
-            pass
 
         for idx in analysis.topo_order:
             node = graph.nodes[idx]
@@ -128,7 +122,23 @@ class Executor:
                         transfer_node = Node(op=transfer_op, inputs=[inp_id], outputs=[transfer_out_id], attrs={})
                         self._run_node(graph, transfer_node, trace=trace, pool=pool, backend=backend, context=context, force_device=Device.CPU) # 搬运算子(TO_DEVICE/FROM_DEVICE)本身通常注册在 CPU device 下
                     
+                    # 动态增加了这个 transfer_out_id 的使用次数
+                    use_count[transfer_out_id] = use_count.get(transfer_out_id, 0) + 1
+                    
                     new_inputs.append(transfer_out_id)
+                    
+                    # 原本的 inp_id 被转移给了 transfer_node，执行完 transfer_node 后相当于被消费了一次
+                    # 但我们是在这里立即执行的，所以需要手动减去它的 use_count 并尝试回收
+                    if keep_set is not None:
+                        use_count[inp_id] = use_count.get(inp_id, 0) - 1
+                        if use_count[inp_id] == 0 and inp_id in graph.buffers and inp_id not in keep_set:
+                            buf = graph.buffers[inp_id]
+                            if pool is not None:
+                                if buf.device == Device.CPU and buf.dtype == DType.FR and isinstance(buf.data, list) and hasattr(pool, "release_cpu"):
+                                    pool.release_cpu(DType.FR, buf.data)
+                                elif buf.device == Device.METAL and hasattr(buf.data, "mtl_buffer") and hasattr(pool, "release_metal"):
+                                    pool.release_metal(buf.data.mtl_buffer)
+                            del graph.buffers[inp_id]
                 else:
                     new_inputs.append(inp_id)
             
@@ -147,9 +157,11 @@ class Executor:
                     use_count[inp] = use_count.get(inp, 0) - 1
                     if use_count[inp] == 0 and inp in graph.buffers and inp not in keep_set:
                         buf = graph.buffers[inp]
-                        # 目前仅对 CPU/FR/list[int] 做内存池复用；其他类型先直接丢弃引用。
-                        if pool is not None and buf.device == Device.CPU and buf.dtype == DType.FR and isinstance(buf.data, list) and hasattr(pool, "release"):
-                            pool.release(DType.FR, buf.data)
+                        if pool is not None:
+                            if buf.device == Device.CPU and buf.dtype == DType.FR and isinstance(buf.data, list) and hasattr(pool, "release_cpu"):
+                                pool.release_cpu(DType.FR, buf.data)
+                            elif buf.device == Device.METAL and hasattr(buf.data, "mtl_buffer") and hasattr(pool, "release_metal"):
+                                pool.release_metal(buf.data.mtl_buffer)
                         del graph.buffers[inp]
 
     def _run_node(

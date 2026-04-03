@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from pyZKP.runtime.ir.ops import OpType
-from pyZKP.runtime.ir.types import Backend, Buffer, Device, DType
-from pyZKP.runtime.kernels.registry import KernelRegistry
-from pyZKP.runtime.metal import MetalBuffer
-from pyZKP.common.crypto.field.fr import FR_MODULUS
+from runtime.ir.ops import OpType
+from runtime.ir.types import Backend, Buffer, Device, DType
+from runtime.kernels.registry import KernelRegistry
+from runtime.metal import MetalBuffer
+from common.crypto.field.fr import FR_MODULUS
 
 
 def register_metal_kernels(registry: KernelRegistry) -> None:
@@ -20,10 +20,10 @@ def register_metal_kernels(registry: KernelRegistry) -> None:
     registry.register(OpType.KZG_BATCH_COMMIT, Device.METAL, _kzg_batch_commit, backend=Backend.METAL)
 
 def _kzg_batch_commit(ctx: Dict[str, Any]) -> Dict[str, Any]:
-    from pyZKP.runtime.metal.msm import metal_msm_g1
-    from pyZKP.runtime.kernels.cpu.kernels import _srs_g1_prefix
-    from pyZKP.common.crypto.ecc.bn254 import G1_ZERO
-    from pyZKP.common.crypto.field.fr import FR_MODULUS
+    from runtime.metal.msm import metal_msm_g1
+    from runtime.kernels.cpu.kernels import _srs_g1_prefix
+    from common.crypto.ecc.bn254 import G1_ZERO
+    from common.crypto.field.fr import FR_MODULUS
     import array
     
     node = ctx["node"]
@@ -78,7 +78,7 @@ def _kzg_batch_commit(ctx: Dict[str, Any]) -> Dict[str, Any]:
     return {"outputs": {out_id: Buffer(id=out_id, device=Device.CPU, dtype=DType.OBJ, data=outs)}}
 
 def _msm_g1(ctx: Dict[str, Any]) -> Dict[str, Any]:
-    from pyZKP.runtime.metal.msm import metal_msm_g1
+    from runtime.metal.msm import metal_msm_g1
     
     node = ctx["node"]
     points: Buffer = ctx["inputs"][0]
@@ -131,7 +131,7 @@ def _poly_sub(ctx: Dict[str, Any]) -> Dict[str, Any]:
 
     n = int(a.data.n)
     out_len = n * 32
-    out_mtl = rt.device.newBufferWithLength_options_(out_len, 0)
+    out_mtl = _alloc_metal(ctx, rt, out_len)
     if out_mtl is None:
         raise RuntimeError("failed to allocate output MTLBuffer")
 
@@ -157,6 +157,12 @@ def _poly_sub(ctx: Dict[str, Any]) -> Dict[str, Any]:
     out = Buffer(id=out_id, device=Device.METAL, dtype=DType.FR, data=MetalBuffer(dtype="fr_mont_u64x4", n=n, mtl_buffer=out_mtl), meta={"n": n})
     return {"outputs": {out_id: out}}
 
+def _alloc_metal(ctx: Dict[str, Any], rt: Any, size: int) -> Any:
+    pool = ctx.get("pool")
+    if pool is not None and hasattr(pool, "alloc_metal"):
+        return pool.alloc_metal(rt, size)
+    return rt.device.newBufferWithLength_options_(size, 0)
+
 def _pointwise_mul(ctx: Dict[str, Any]) -> Dict[str, Any]:
     import Metal  # type: ignore
     import struct
@@ -179,7 +185,7 @@ def _pointwise_mul(ctx: Dict[str, Any]) -> Dict[str, Any]:
 
     n = int(a.data.n)
     out_len = n * 32
-    out_mtl = rt.device.newBufferWithLength_options_(out_len, 0)
+    out_mtl = _alloc_metal(ctx, rt, out_len)
     if out_mtl is None:
         raise RuntimeError("failed to allocate output MTLBuffer")
 
@@ -252,7 +258,7 @@ def _coset_evals_from_coeffs(ctx: Dict[str, Any]) -> Dict[str, Any]:
         ],
     ).tobytes()
 
-    scaled_mtl = rt.device.newBufferWithLength_options_(n * 32, 0)
+    scaled_mtl = _alloc_metal(ctx, rt, n * 32)
     nb = struct.pack("I", int(n))
     in_size_b = struct.pack("I", int(in_size))
 
@@ -338,7 +344,7 @@ def _coset_coeffs_from_evals(ctx: Dict[str, Any]) -> Dict[str, Any]:
     intt_buf = res["outputs"][out_id]
     intt_mtl = intt_buf.data.mtl_buffer
 
-    out_mtl = rt.device.newBufferWithLength_options_(n * 32, 0)
+    out_mtl = _alloc_metal(ctx, rt, n * 32)
     nb = struct.pack("I", int(n))
     in_size_b = struct.pack("I", int(n)) # intt output is size n
 
@@ -411,7 +417,7 @@ def _roots_evals_from_coeffs(ctx: Dict[str, Any]) -> Dict[str, Any]:
     if wlen_buf is None:
         raise RuntimeError("failed to allocate wlen buffer")
 
-    out_mtl = rt.device.newBufferWithLength_options_(n * 32, 0)
+    out_mtl = _alloc_metal(ctx, rt, n * 32)
     if out_mtl is None:
         raise RuntimeError("failed to allocate output buffer")
 
@@ -509,7 +515,7 @@ def _roots_coeffs_from_evals(ctx: Dict[str, Any]) -> Dict[str, Any]:
     if wlen_buf is None:
         raise RuntimeError("failed to allocate wlen buffer")
 
-    out_mtl = rt.device.newBufferWithLength_options_(n * 32, 0)
+    out_mtl = _alloc_metal(ctx, rt, n * 32)
     if out_mtl is None:
         raise RuntimeError("failed to allocate output buffer")
 

@@ -10,8 +10,8 @@ Kernel 注册表。
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Tuple
 
-from pyZKP.runtime.ir.ops import OpType
-from pyZKP.runtime.ir.types import Backend, Device
+from runtime.ir.ops import OpType
+from runtime.ir.types import Backend, Device
 
 # 定义所有底层执行函数的标准签名
 KernelFn = Callable[[Dict[str, Any]], Dict[str, Any]]

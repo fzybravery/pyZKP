@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from pyZKP.runtime.metal.ecc_source import _ECC_KERNEL_SOURCE
+from runtime.metal.ecc_source import _ECC_KERNEL_SOURCE
 
 # 检查 Metal 是否可用
 

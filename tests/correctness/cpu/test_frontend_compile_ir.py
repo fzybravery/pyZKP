@@ -1,9 +1,9 @@
 import unittest
 from dataclasses import dataclass
 
-from pyZKP import build_witness, check_r1cs, compile_circuit
-from pyZKP.common.ir.core import LinExpr, VarRef, Visibility
-from pyZKP.frontend.circuit.schema import public, secret
+from frontend.api import build_witness, check_r1cs, compile_circuit
+from common.ir.core import LinExpr, VarRef, Visibility
+from frontend.circuit.schema import public, secret
 
 
 BN254_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617

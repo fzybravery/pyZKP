@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Sequence, Tuple
 
-from pyZKP.backend.schemes.groth16.types import ProvingKey as Groth16ProvingKey
-from pyZKP.backend.schemes.plonk.types import ProvingKey as PlonkProvingKey
-from pyZKP.common.crypto.ecc.bn254 import G1
-from pyZKP.common.crypto.msm import fixed_base_get_cached, fixed_base_precompute
+from backend.schemes.groth16.types import ProvingKey as Groth16ProvingKey
+from backend.schemes.plonk.types import ProvingKey as PlonkProvingKey
+from common.crypto.ecc.bn254 import G1
+from common.crypto.msm import fixed_base_get_cached, fixed_base_precompute
 
 # 缓存 points tuple
 _POINTS_TUPLE_CACHE: Dict[int, Tuple[G1, ...]] = {}
@@ -35,7 +35,7 @@ def warmup_fixed_base_points(points: Tuple[G1, ...], window_bits: int = 8) -> bo
 
 # 预热 Plonk 中的 fixed_base
 def warmup_plonk_fixed_base(pk: PlonkProvingKey, *, n_points: int = 0, window_bits: int = 8) -> Dict[str, Any]:
-    from pyZKP.runtime.kernels.cpu import kernels as cpu_kernels
+    from runtime.kernels.cpu import kernels as cpu_kernels
 
     if n_points and int(n_points) > 0:
         n = int(n_points)

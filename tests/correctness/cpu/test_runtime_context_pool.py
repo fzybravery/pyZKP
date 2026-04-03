@@ -1,11 +1,11 @@
 import unittest
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.crypto.poly import omega_for_size
-from pyZKP.runtime import CPUContext, Executor, KernelRegistry
-from pyZKP.runtime.ir import Device, DType, Graph, OpType
-from pyZKP.runtime.kernels.cpu import register_cpu_kernels
-from pyZKP.runtime.memory import CPUMemoryPool
+from common.crypto.field.fr import FR_MODULUS
+from common.crypto.poly import omega_for_size
+from runtime import CPUContext, Executor, KernelRegistry
+from runtime.ir import Device, DType, Graph, OpType
+from runtime.kernels.cpu import register_cpu_kernels
+from runtime.memory import CPUMemoryPool
 
 
 class TestRuntimeContextPool(unittest.TestCase):
@@ -30,9 +30,9 @@ class TestRuntimeContextPool(unittest.TestCase):
             self.assertEqual(len(g.buffers["coeff2"].data), n)
 
         run_once()
-        reuse0 = pool.stats.reuse_calls
+        reuse0 = pool.cpu_stats.reuse_calls
         run_once()
-        self.assertGreater(pool.stats.reuse_calls, reuse0)
+        self.assertGreater(pool.cpu_stats.reuse_calls, reuse0)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 import unittest
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.runtime.cache import circuit_ir_fingerprint
-from pyZKP.runtime.bench import RepeatMulCircuit
-from pyZKP import compile_circuit
+from common.crypto.field.fr import FR_MODULUS
+from runtime.cache import circuit_ir_fingerprint
+from runtime.bench import RepeatMulCircuit
+from frontend.api import compile_circuit
 
 
 class TestRuntimeCache(unittest.TestCase):

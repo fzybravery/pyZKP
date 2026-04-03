@@ -1,14 +1,14 @@
 import os
 import unittest
-from pyZKP.runtime.ir.ops import OpType
-from pyZKP.runtime.ir.types import Backend, Device, DType
-from pyZKP.runtime.ir.graph import Graph
-from pyZKP.runtime.kernels.registry import KernelRegistry
-from pyZKP.runtime.executor import Executor
-from pyZKP.runtime.context import CPUContext, MetalContext
-from pyZKP.runtime.memory import CPUMemoryPool
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.runtime.metal.runtime import metal_available
+from runtime.ir.ops import OpType
+from runtime.ir.types import Backend, Device, DType
+from runtime.ir.graph import Graph
+from runtime.kernels.registry import KernelRegistry
+from runtime.executor import Executor
+from runtime.context import CPUContext, MetalContext
+from runtime.memory import CPUMemoryPool
+from common.crypto.field.fr import FR_MODULUS
+from runtime.metal.runtime import metal_available
 
 class TestRuntimeMetalFRPolyMul(unittest.TestCase):
     def setUp(self):
@@ -16,8 +16,8 @@ class TestRuntimeMetalFRPolyMul(unittest.TestCase):
             self.skipTest("Metal is not available on this machine.")
 
     def test_poly_mul_matches_cpu(self):
-        from pyZKP.runtime.kernels.cpu import register_cpu_kernels
-        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        from runtime.kernels.cpu import register_cpu_kernels
+        from runtime.kernels.metal import register_metal_kernels
 
         reg = KernelRegistry()
         register_cpu_kernels(reg, backend=Backend.METAL)
@@ -40,7 +40,7 @@ class TestRuntimeMetalFRPolyMul(unittest.TestCase):
         
         out_metal = g.buffers["c"].data
         
-        from pyZKP.common.crypto.poly.ntt import poly_mul_ntt
+        from common.crypto.poly.ntt import poly_mul_ntt
         ref_c = poly_mul_ntt(a_data, b_data)
 
         self.assertEqual(len(out_metal), len(ref_c))

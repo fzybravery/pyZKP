@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Sequence
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv
+from common.crypto.field.fr import FR_MODULUS, fr_inv
 
 # 使用蒙哥马利变换批量求逆元
 def fr_batch_inv(xs: Sequence[int]) -> List[int]:

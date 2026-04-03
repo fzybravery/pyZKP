@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence
 
-from pyZKP.backend.schemes.groth16.qap import compute_h_from_abc_on_roots
-from pyZKP.backend.schemes.groth16.r1cs import compile_r1cs, eval_r1cs_vectors
-from pyZKP.backend.schemes.groth16.types import Proof, ProvingKey
-from pyZKP.common.crypto.ecc.bn254 import G1, G1_ZERO, G2, g1_add, g1_mul, g1_sub, g2_add, g2_mul
-from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_rand
-from pyZKP.common.crypto.poly import omega_for_size
-from pyZKP.common.ir.core import CircuitIR
-from pyZKP.frontend.api.witness import Witness
-from pyZKP.runtime import Executor, KernelRegistry, RuntimeConfig
-from pyZKP.runtime.ir import Device, DType, Graph, OpType
-from pyZKP.runtime.kernels.cpu import register_cpu_kernels
+from backend.schemes.groth16.qap import compute_h_from_abc_on_roots
+from backend.schemes.groth16.r1cs import compile_r1cs, eval_r1cs_vectors
+from backend.schemes.groth16.types import Proof, ProvingKey
+from common.crypto.ecc.bn254 import G1, G1_ZERO, G2, g1_add, g1_mul, g1_sub, g2_add, g2_mul
+from common.crypto.field.fr import FR_MODULUS, fr_rand
+from common.crypto.poly import omega_for_size
+from common.ir.core import CircuitIR
+from frontend.api.witness import Witness
+from runtime import Executor, KernelRegistry, RuntimeConfig
+from runtime.ir import Device, DType, Graph, OpType
+from runtime.kernels.cpu import register_cpu_kernels
 
 
 """
@@ -51,18 +51,18 @@ def prove(
 
     # 初始化 Runtime 执行引擎
     reg = KernelRegistry()
-    from pyZKP.runtime.ir import Backend
+    from runtime.ir import Backend
 
     backend0 = runtime_config.backend if runtime_config is not None else Backend.CPU
     if runtime_context is not None:
         backend0 = runtime_context.backend
     register_cpu_kernels(reg, backend=backend0)
     if backend0 == Backend.METAL:
-        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        from runtime.kernels.metal import register_metal_kernels
         register_metal_kernels(reg)
     exe = Executor(registry=reg)
     attrs0: Dict[str, Any] = runtime_config.with_overrides(runtime_attrs) if runtime_config is not None else dict(runtime_attrs or {})
-    from pyZKP.runtime.warmup import apply_fixed_base_policy_groth16
+    from runtime.warmup import apply_fixed_base_policy_groth16
 
     attrs0 = apply_fixed_base_policy_groth16(pk, attrs0)
     ctx0 = runtime_config.make_context(pool=runtime_pool, context=runtime_context) if runtime_config is not None else runtime_context
@@ -70,7 +70,7 @@ def prove(
 
     # 将数据存储到runtime缓冲区中
     g.add_buffer(id="w", device=Device.CPU, dtype=DType.FR, data=w)
-    from pyZKP.runtime.warmup import cached_points_tuple
+    from runtime.warmup import cached_points_tuple
 
     g.add_buffer(id="a_query", device=Device.CPU, dtype=DType.G1, data=cached_points_tuple(pk.a_query))
     g.add_buffer(id="b_query_g2", device=Device.CPU, dtype=DType.G2, data=list(pk.b_query_g2))
@@ -147,18 +147,18 @@ def prove_batch(
     omega = omega_for_size(n)
 
     reg = KernelRegistry()
-    from pyZKP.runtime.ir import Backend
+    from runtime.ir import Backend
 
     backend0 = runtime_config.backend if runtime_config is not None else Backend.CPU
     if runtime_context is not None:
         backend0 = runtime_context.backend
     register_cpu_kernels(reg, backend=backend0)
     if backend0 == Backend.METAL:
-        from pyZKP.runtime.kernels.metal import register_metal_kernels
+        from runtime.kernels.metal import register_metal_kernels
         register_metal_kernels(reg)
     exe = Executor(registry=reg)
     attrs0: Dict[str, Any] = runtime_config.with_overrides(runtime_attrs) if runtime_config is not None else dict(runtime_attrs or {})
-    from pyZKP.runtime.warmup import apply_fixed_base_policy_groth16, cached_points_tuple
+    from runtime.warmup import apply_fixed_base_policy_groth16, cached_points_tuple
 
     attrs0 = apply_fixed_base_policy_groth16(pk, attrs0)
     ctx0 = runtime_config.make_context(pool=runtime_pool, context=runtime_context) if runtime_config is not None else runtime_context

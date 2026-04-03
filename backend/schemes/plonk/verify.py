@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Dict, List, Sequence, Tuple
 
-from pyZKP.backend.schemes.plonk.transcript import Transcript
-from pyZKP.backend.schemes.plonk.types import Proof, VerifyingKey
-from pyZKP.common.crypto.ecc.bn254 import G1, G1_GENERATOR, G1_ZERO, g1_add, g1_mul, g1_sub
-from pyZKP.common.crypto.field.fr import FR_MODULUS, fr_inv
-from pyZKP.common.crypto.poly import barycentric_precompute, barycentric_value, poly_eval
+from backend.schemes.plonk.transcript import Transcript
+from backend.schemes.plonk.types import Proof, VerifyingKey
+from common.crypto.ecc.bn254 import G1, G1_GENERATOR, G1_ZERO, g1_add, g1_mul, g1_sub
+from common.crypto.field.fr import FR_MODULUS, fr_inv
+from common.crypto.poly import barycentric_precompute, barycentric_value, poly_eval
 
 
 def verify(vk: VerifyingKey, proof: Proof, public_values: Sequence[int]) -> bool:

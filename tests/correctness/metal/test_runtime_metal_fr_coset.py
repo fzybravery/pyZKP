@@ -1,12 +1,12 @@
 import unittest
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.crypto.poly.ntt import omega_for_size, evals_from_coeffs_on_coset, coeffs_from_evals_on_coset
-from pyZKP.runtime import Executor, KernelRegistry, RuntimeConfig
-from pyZKP.runtime.ir import Backend, Device, DType, Graph, OpType
-from pyZKP.runtime.kernels.cpu import register_cpu_kernels
-from pyZKP.runtime.kernels.metal import register_metal_kernels
-from pyZKP.runtime.metal import metal_available
+from common.crypto.field.fr import FR_MODULUS
+from common.crypto.poly.ntt import omega_for_size, evals_from_coeffs_on_coset, coeffs_from_evals_on_coset
+from runtime import Executor, KernelRegistry, RuntimeConfig
+from runtime.ir import Backend, Device, DType, Graph, OpType
+from runtime.kernels.cpu import register_cpu_kernels
+from runtime.kernels.metal import register_metal_kernels
+from runtime.metal import metal_available
 
 @unittest.skipUnless(metal_available(), "Metal runtime not available")
 class TestRuntimeMetalFRCoset(unittest.TestCase):

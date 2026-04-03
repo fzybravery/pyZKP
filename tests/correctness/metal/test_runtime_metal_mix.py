@@ -1,11 +1,11 @@
 import unittest
 
-from pyZKP.runtime import Executor, KernelRegistry, RuntimeConfig
-from pyZKP.runtime.ir import Backend, Device, DType, Graph, OpType
-from pyZKP.runtime.kernels.cpu import register_cpu_kernels
-from pyZKP.runtime.kernels.metal import register_metal_kernels
-from pyZKP.runtime.metal import metal_available
-from pyZKP.runtime.trace import Trace
+from runtime import Executor, KernelRegistry, RuntimeConfig
+from runtime.ir import Backend, Device, DType, Graph, OpType
+from runtime.kernels.cpu import register_cpu_kernels
+from runtime.kernels.metal import register_metal_kernels
+from runtime.metal import metal_available
+from runtime.trace import Trace
 
 
 @unittest.skipUnless(metal_available(), "Metal runtime not available")

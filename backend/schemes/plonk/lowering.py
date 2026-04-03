@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
-from pyZKP.backend.schemes.plonk.domain import find_coset_factors, next_power_of_two, roots_of_unity
-from pyZKP.backend.schemes.plonk.types import Circuit, Domain, Gate
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.ir.core import CircuitIR, LinExpr
+from backend.schemes.plonk.domain import find_coset_factors, next_power_of_two, roots_of_unity
+from backend.schemes.plonk.types import Circuit, Domain, Gate
+from common.crypto.field.fr import FR_MODULUS
+from common.ir.core import CircuitIR, LinExpr
 
 
 # 将高级的 R1CS 约束系统（CircuitIR）降级转换为 PLONK 的标准门（Standard Gates）。

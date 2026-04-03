@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Sequence
 
-from pyZKP.common.ir.core import (
+from common.ir.core import (
     Expr,
     Field,
     Hint,
@@ -17,7 +17,7 @@ from pyZKP.common.ir.core import (
     lin_neg,
     lin_sub,
 )
-from pyZKP.frontend.api.hints import GLOBAL_HINTS, HintFn
+from frontend.api.hints import GLOBAL_HINTS, HintFn
 
 """
 API 接口层，允许用户编写电路

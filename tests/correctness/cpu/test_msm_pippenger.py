@@ -1,10 +1,10 @@
 import secrets
 import unittest
 
-from pyZKP.common.crypto.field.fr import FR_MODULUS
-from pyZKP.common.crypto.kzg.cpu_ref import setup_srs
-from pyZKP.common.crypto.ecc.bn254 import g1_eq, g2_eq
-from pyZKP.common.crypto.msm import fixed_base_precompute, msm_fixed_base, msm_fixed_base_batch, msm_naive_g1, msm_naive_g2, msm_pippenger, msm_pippenger_batch, msm_pippenger_g2
+from common.crypto.field.fr import FR_MODULUS
+from common.crypto.kzg.cpu_ref import setup_srs
+from common.crypto.ecc.bn254 import g1_eq, g2_eq
+from common.crypto.msm import fixed_base_precompute, msm_fixed_base, msm_fixed_base_batch, msm_naive_g1, msm_naive_g2, msm_pippenger, msm_pippenger_batch, msm_pippenger_g2
 
 
 class TestMSMPippenger(unittest.TestCase):
