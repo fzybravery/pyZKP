@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Sequence, Tuple
 
-from backend.schemes.groth16.types import ProvingKey as Groth16ProvingKey
-from backend.schemes.plonk.types import ProvingKey as PlonkProvingKey
-from common.crypto.ecc.bn254 import G1
-from common.crypto.msm import fixed_base_get_cached, fixed_base_precompute
+from protocols.groth16.types import ProvingKey as Groth16ProvingKey
+from protocols.plonk.types import ProvingKey as PlonkProvingKey
+from crypto.ecc.bn254 import G1
+from crypto.msm import fixed_base_get_cached, fixed_base_precompute
 
 # 缓存 points tuple
 _POINTS_TUPLE_CACHE: Dict[int, Tuple[G1, ...]] = {}

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Sequence
 
-from common.ir.core import (
+from frontend.ir.core import (
     Expr,
     Field,
     Hint,

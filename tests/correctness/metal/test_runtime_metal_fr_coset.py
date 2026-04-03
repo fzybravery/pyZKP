@@ -1,7 +1,7 @@
 import unittest
 
-from common.crypto.field.fr import FR_MODULUS
-from common.crypto.poly.ntt import omega_for_size, evals_from_coeffs_on_coset, coeffs_from_evals_on_coset
+from crypto.field.fr import FR_MODULUS
+from crypto.poly.ntt import omega_for_size, evals_from_coeffs_on_coset, coeffs_from_evals_on_coset
 from runtime import Executor, KernelRegistry, RuntimeConfig
 from runtime.ir import Backend, Device, DType, Graph, OpType
 from runtime.kernels.cpu import register_cpu_kernels

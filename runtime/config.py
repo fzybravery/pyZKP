@@ -20,6 +20,10 @@ class RuntimeConfig:
     reuse_graph: bool = False
     reuse_prove_batch: bool = False
 
+    # Metal 加速特有策略（A/B 测试开关）
+    metal_ntt_mode: str = "v1"  # "v1" 为基准 Cooley-Tukey，"v2" 为优化版
+    metal_msm_mode: str = "v1"  # "v1" 为基准 Bucket-centric，"v2" 为优化版
+
     # 将fixed_base等策略转换为运行时参数（attrs dict）
     def runtime_attrs(self) -> Dict[str, Any]:
         return {
@@ -27,6 +31,8 @@ class RuntimeConfig:
             "fixed_base_window_bits": int(self.fixed_base_window_bits),
             "fixed_base_auto_min_points": int(self.fixed_base_auto_min_points),
             "fixed_base_auto_groth16_min_calls": int(self.fixed_base_auto_groth16_min_calls),
+            "metal_ntt_mode": str(self.metal_ntt_mode),
+            "metal_msm_mode": str(self.metal_msm_mode),
         }
 
     # 在默认 attrs 上叠加调用方临时覆盖的参数
@@ -44,5 +50,5 @@ class RuntimeConfig:
         if context is not None:
             return context
         if self.backend == Backend.METAL:
-            return MetalContext.create_default(pool=pool)
-        return CPUContext(pool=pool, backend=self.backend)
+            return MetalContext.create_default(pool=pool, config=self)
+        return CPUContext(pool=pool, backend=self.backend, config=self)

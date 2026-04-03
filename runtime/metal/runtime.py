@@ -329,6 +329,38 @@ kernel void intt_mul_inv_n(
     inout[gid] = mont_mul(inout[gid], inv_n);
 }
 
+// -----------------------------------------------------------------------------
+// 并行 NTT/iNTT 实现 v2 (Stockham + 预计算旋转因子)
+// -----------------------------------------------------------------------------
+
+kernel void ntt_stockham(
+    const device Fr* in_buf [[buffer(0)]],
+    device Fr* out_buf [[buffer(1)]],
+    const device Fr* twiddles [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    constant uint& s [[buffer(4)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= n / 2) return;
+    
+    uint half_len = 1 << s;
+    uint j = gid / half_len;
+    uint k = gid % half_len;
+    
+    uint i0 = j * half_len + k;
+    uint i1 = i0 + n / 2;
+    
+    Fr u = in_buf[i0];
+    Fr w = twiddles[(1 << s) - 1 + k];
+    Fr v = mont_mul(in_buf[i1], w);
+    
+    uint out_idx0 = j * (2 * half_len) + k;
+    uint out_idx1 = out_idx0 + half_len;
+    
+    out_buf[out_idx0] = add_mod(u, v);
+    out_buf[out_idx1] = sub_mod2(u, v);
+}
+
 // 保留原有的单线程版本作备用或兼容（可选），我们将修改 Python 端调用新的并行版本
 kernel void roots_evals_from_coeffs_fr_mont(
     const device Fr* in [[buffer(0)]],
@@ -447,9 +479,15 @@ class MetalRuntime:
     pso_roots_coeffs_from_evals_fr_mont: Any
     pso_msm_bucket_accumulate: Any
     pso_msm_bucket_reduce: Any
+    pso_msm_csr_histogram: Any
+    pso_msm_csr_prefix_sum: Any
+    pso_msm_csr_scatter: Any
+    pso_msm_bucket_accumulate_v2: Any
+    pso_msm_bucket_reduce_v2: Any
     pso_ntt_bit_reverse: Any
     pso_ntt_butterfly: Any
     pso_intt_mul_inv_n: Any
+    pso_ntt_stockham: Any
 
     # 初始化并且装配所有的 Metal 核心组件
     @staticmethod
@@ -519,6 +557,29 @@ class MetalRuntime:
         pso_msm2, err = dev.newComputePipelineStateWithFunction_error_(fn_msm2, None)
         if pso_msm2 is None:
             raise RuntimeError(f"failed to create pipeline state: {err}")
+            
+        fn_csr_hist = ecc_lib.newFunctionWithName_("msm_csr_histogram")
+        pso_csr_hist, _ = dev.newComputePipelineStateWithFunction_error_(fn_csr_hist, None)
+        
+        fn_csr_pre = ecc_lib.newFunctionWithName_("msm_csr_prefix_sum")
+        pso_csr_pre, _ = dev.newComputePipelineStateWithFunction_error_(fn_csr_pre, None)
+        
+        fn_csr_scat = ecc_lib.newFunctionWithName_("msm_csr_scatter")
+        pso_csr_scat, _ = dev.newComputePipelineStateWithFunction_error_(fn_csr_scat, None)
+
+        fn_msm1_v2 = ecc_lib.newFunctionWithName_("msm_bucket_accumulate_v2")
+        if fn_msm1_v2 is None:
+            raise RuntimeError("failed to find kernel function: msm_bucket_accumulate_v2")
+        pso_msm1_v2, err = dev.newComputePipelineStateWithFunction_error_(fn_msm1_v2, None)
+        if pso_msm1_v2 is None:
+            raise RuntimeError(f"failed to create pipeline state: {err}")
+
+        fn_msm2_v2 = ecc_lib.newFunctionWithName_("msm_bucket_reduce_v2")
+        if fn_msm2_v2 is None:
+            raise RuntimeError("failed to find kernel function: msm_bucket_reduce_v2")
+        pso_msm2_v2, err = dev.newComputePipelineStateWithFunction_error_(fn_msm2_v2, None)
+        if pso_msm2_v2 is None:
+            raise RuntimeError(f"failed to create pipeline state: {err}")
 
         fn_br = lib.newFunctionWithName_("ntt_bit_reverse")
         if fn_br is None:
@@ -534,6 +595,11 @@ class MetalRuntime:
         if fn_im is None:
             raise RuntimeError("failed to find kernel function: intt_mul_inv_n")
         pso_im, err = dev.newComputePipelineStateWithFunction_error_(fn_im, None)
+
+        fn_st = lib.newFunctionWithName_("ntt_stockham")
+        if fn_st is None:
+            raise RuntimeError("failed to find kernel function: ntt_stockham")
+        pso_st, err = dev.newComputePipelineStateWithFunction_error_(fn_st, None)
 
         q = dev.newCommandQueue()
         if q is None:
@@ -551,7 +617,13 @@ class MetalRuntime:
             pso_roots_coeffs_from_evals_fr_mont=pso2,
             pso_msm_bucket_accumulate=pso_msm1,
             pso_msm_bucket_reduce=pso_msm2,
+            pso_msm_csr_histogram=pso_csr_hist,
+            pso_msm_csr_prefix_sum=pso_csr_pre,
+            pso_msm_csr_scatter=pso_csr_scat,
+            pso_msm_bucket_accumulate_v2=pso_msm1_v2,
+            pso_msm_bucket_reduce_v2=pso_msm2_v2,
             pso_ntt_bit_reverse=pso_br,
             pso_ntt_butterfly=pso_bf,
             pso_intt_mul_inv_n=pso_im,
+            pso_ntt_stockham=pso_st,
         )

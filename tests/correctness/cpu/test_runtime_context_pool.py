@@ -1,7 +1,7 @@
 import unittest
 
-from common.crypto.field.fr import FR_MODULUS
-from common.crypto.poly import omega_for_size
+from crypto.field.fr import FR_MODULUS
+from crypto.poly import omega_for_size
 from runtime import CPUContext, Executor, KernelRegistry
 from runtime.ir import Device, DType, Graph, OpType
 from runtime.kernels.cpu import register_cpu_kernels

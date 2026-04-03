@@ -1,7 +1,7 @@
 import secrets
 import unittest
 
-from common.crypto.field import FR_MODULUS, fr_batch_inv, fr_inv
+from crypto.field import FR_MODULUS, fr_batch_inv, fr_inv
 
 # 有限域批量求逆正确性测试
 class TestFieldBatchInv(unittest.TestCase):

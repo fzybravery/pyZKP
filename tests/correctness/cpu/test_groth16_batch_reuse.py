@@ -2,8 +2,8 @@ import unittest
 from dataclasses import dataclass
 
 from frontend.api import build_witness, check_r1cs, compile_circuit
-from backend.schemes.groth16 import setup, verify
-from backend.schemes.groth16.prove import prove_batch
+from protocols.groth16 import setup, verify
+from protocols.groth16.prove import prove_batch
 from frontend.circuit.schema import public, secret
 
 

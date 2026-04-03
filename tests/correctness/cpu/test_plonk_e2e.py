@@ -2,7 +2,7 @@ import unittest
 from dataclasses import dataclass
 
 from frontend.api import build_witness, check_r1cs, compile_circuit
-from backend.schemes.plonk import prove, setup, verify
+from protocols.plonk import prove, setup, verify
 from frontend.circuit.schema import public, secret
 
 

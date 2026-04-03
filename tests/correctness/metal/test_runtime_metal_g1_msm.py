@@ -7,8 +7,8 @@ from runtime.kernels.registry import KernelRegistry
 from runtime.executor import Executor
 from runtime.context import MetalContext
 from runtime.memory import CPUMemoryPool
-from common.crypto.field.fr import FR_MODULUS
-from common.crypto.ecc.bn254 import G1_GENERATOR, g1_mul
+from crypto.field.fr import FR_MODULUS
+from crypto.ecc.bn254 import G1_GENERATOR, g1_mul
 from runtime.metal.runtime import metal_available
 
 class TestRuntimeMetalG1MSM(unittest.TestCase):
@@ -54,7 +54,7 @@ class TestRuntimeMetalG1MSM(unittest.TestCase):
         out_metal = g.buffers["msm_res"].data
         
         # 使用 CPU 参考实现 (Naive 或 Pippenger)
-        from common.crypto.msm.pippenger import msm_pippenger
+        from crypto.msm.pippenger import msm_pippenger
         ref_msm = msm_pippenger(points_data, scalars_data)
 
         # 验证仿射坐标是否完全一致

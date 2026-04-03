@@ -1,6 +1,6 @@
 import unittest
 
-from common.crypto.field.fr import FR_MODULUS
+from crypto.field.fr import FR_MODULUS
 from runtime import Executor, KernelRegistry, RuntimeConfig
 from runtime.ir import Backend, Device, DType, Graph, OpType
 from runtime.kernels.cpu import register_cpu_kernels

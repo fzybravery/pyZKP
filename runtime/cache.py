@@ -6,7 +6,7 @@ import os
 import pickle
 from typing import Any, Dict, Tuple
 
-from common.ir.core.model import CircuitIR, Hint, LinExpr, VarRef
+from frontend.ir.core.model import CircuitIR, Hint, LinExpr, VarRef
 
 SETUP_CACHE_FORMAT_VERSION = 1
 

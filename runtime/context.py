@@ -13,6 +13,7 @@ class DeviceContext:
     backend: Backend = Backend.CPU
     device: Device = Device.CPU
     pool: Any | None = None
+    config: Any | None = None  # Reference to RuntimeConfig
 
 # CPU 上下文
 @dataclass
@@ -28,8 +29,8 @@ class MetalContext(DeviceContext):
     metal: Any | None = None
 
     @staticmethod
-    def create_default(*, pool=None) -> "MetalContext":
+    def create_default(*, pool=None, config=None) -> "MetalContext":
         if not metal_available():
             raise RuntimeError("Metal runtime not available (missing PyObjC Metal/MetalKit)")
         rt = MetalRuntime.create_default()
-        return MetalContext(pool=pool, metal=rt)
+        return MetalContext(pool=pool, metal=rt, config=config)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple, cast
 
-from common.ir.core import CircuitIR, Expr, Hint, LinExpr, VarRef
+from frontend.ir.core import CircuitIR, Expr, Hint, LinExpr, VarRef
 from frontend.api.hints import GLOBAL_HINTS, HintRegistry
 
 # ZKP 的 witness，存储电路输入、输出、中间值

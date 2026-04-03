@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Dict, List, Tuple
 
-from common.ir.core import Input, Var, VarRef, Visibility
+from frontend.ir.core import Input, Var, VarRef, Visibility
 
 # 记录标签的可见性
 @dataclass(frozen=True)

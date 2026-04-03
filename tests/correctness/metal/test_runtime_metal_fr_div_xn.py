@@ -7,7 +7,7 @@ from runtime.kernels.registry import KernelRegistry
 from runtime.executor import Executor
 from runtime.context import CPUContext, MetalContext
 from runtime.memory import CPUMemoryPool
-from common.crypto.field.fr import FR_MODULUS
+from crypto.field.fr import FR_MODULUS
 from runtime.metal.runtime import metal_available
 
 class TestRuntimeMetalFRDivXN(unittest.TestCase):
@@ -39,7 +39,7 @@ class TestRuntimeMetalFRDivXN(unittest.TestCase):
         out_q = g.buffers["q"].data
         out_r = g.buffers["r"].data
         
-        from common.crypto.poly.fast import poly_div_by_xn_minus_1
+        from crypto.poly.fast import poly_div_by_xn_minus_1
         ref_q, ref_r = poly_div_by_xn_minus_1(a_data, n)
 
         self.assertEqual(len(out_q), len(ref_q))

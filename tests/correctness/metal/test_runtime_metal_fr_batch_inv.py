@@ -7,7 +7,7 @@ from runtime.kernels.registry import KernelRegistry
 from runtime.executor import Executor
 from runtime.context import CPUContext, MetalContext
 from runtime.memory import CPUMemoryPool
-from common.crypto.field.fr import FR_MODULUS
+from crypto.field.fr import FR_MODULUS
 from runtime.metal.runtime import metal_available
 
 class TestRuntimeMetalFRBatchInv(unittest.TestCase):
@@ -48,7 +48,7 @@ class TestRuntimeMetalFRBatchInv(unittest.TestCase):
         out_metal = g.buffers["inv_a"].data
         
         # 使用 CPU 参考实现
-        from common.crypto.field.batch import fr_batch_inv
+        from crypto.field.batch import fr_batch_inv
         ref_inv = fr_batch_inv(a_data)
 
         self.assertEqual(len(out_metal), len(ref_inv))

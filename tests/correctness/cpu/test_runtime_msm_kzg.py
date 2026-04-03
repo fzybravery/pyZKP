@@ -1,8 +1,8 @@
 import secrets
 import unittest
 
-from common.crypto.field.fr import FR_MODULUS
-from common.crypto.kzg.cpu_ref import commit, open_proof, setup_srs
+from crypto.field.fr import FR_MODULUS
+from crypto.kzg.cpu_ref import commit, open_proof, setup_srs
 from runtime import Executor, KernelRegistry
 from runtime.ir import Device, DType, Graph, OpType
 from runtime.kernels.cpu import register_cpu_kernels

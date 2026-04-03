@@ -1,8 +1,8 @@
 import secrets
 import unittest
 
-from common.crypto.field.fr import FR_MODULUS
-from common.crypto.poly import (
+from crypto.field.fr import FR_MODULUS
+from crypto.poly import (
     coeffs_from_evals_on_roots,
     evals_from_coeffs_on_coset,
     evals_from_coeffs_on_roots,
@@ -14,8 +14,8 @@ from common.crypto.poly import (
     poly_div_by_xn_minus_1,
     roots_of_unity,
 )
-from common.crypto.poly.cpu_ref import poly_eval
-from common.crypto.poly.cpu_ref import poly_divmod
+from crypto.poly.cpu_ref import poly_eval
+from crypto.poly.cpu_ref import poly_divmod
 
 
 """

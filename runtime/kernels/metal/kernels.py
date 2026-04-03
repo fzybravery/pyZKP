@@ -6,7 +6,7 @@ from runtime.ir.ops import OpType
 from runtime.ir.types import Backend, Buffer, Device, DType
 from runtime.kernels.registry import KernelRegistry
 from runtime.metal import MetalBuffer
-from common.crypto.field.fr import FR_MODULUS
+from crypto.field.fr import FR_MODULUS
 
 
 def register_metal_kernels(registry: KernelRegistry) -> None:
@@ -20,10 +20,10 @@ def register_metal_kernels(registry: KernelRegistry) -> None:
     registry.register(OpType.KZG_BATCH_COMMIT, Device.METAL, _kzg_batch_commit, backend=Backend.METAL)
 
 def _kzg_batch_commit(ctx: Dict[str, Any]) -> Dict[str, Any]:
-    from runtime.metal.msm import metal_msm_g1
+    from runtime.metal.msm import metal_msm_g1, metal_msm_g1_v2
     from runtime.kernels.cpu.kernels import _srs_g1_prefix
-    from common.crypto.ecc.bn254 import G1_ZERO
-    from common.crypto.field.fr import FR_MODULUS
+    from crypto.ecc.bn254 import G1_ZERO
+    from crypto.field.fr import FR_MODULUS
     import array
     
     node = ctx["node"]
@@ -35,6 +35,7 @@ def _kzg_batch_commit(ctx: Dict[str, Any]) -> Dict[str, Any]:
     if c is None or getattr(c, "metal", None) is None:
         raise RuntimeError("metal kzg_batch_commit requires MetalContext")
     rt = c.metal
+    msm_mode = getattr(c.config, "metal_msm_mode", "v1") if c.config else "v1"
     
     s = srs.data
     scalars_list = []
@@ -72,13 +73,16 @@ def _kzg_batch_commit(ctx: Dict[str, Any]) -> Dict[str, Any]:
         mtl_buffer = rt.device.newBufferWithBytes_length_options_(b, len(b), 0)
         
         # 调用 Metal MSM
-        acc = metal_msm_g1(rt, points, mtl_buffer, len(sc))
+        if msm_mode == "v2":
+            acc = metal_msm_g1_v2(rt, points, mtl_buffer, len(sc))
+        else:
+            acc = metal_msm_g1(rt, points, mtl_buffer, len(sc))
         outs.append(acc)
         
     return {"outputs": {out_id: Buffer(id=out_id, device=Device.CPU, dtype=DType.OBJ, data=outs)}}
 
 def _msm_g1(ctx: Dict[str, Any]) -> Dict[str, Any]:
-    from runtime.metal.msm import metal_msm_g1
+    from runtime.metal.msm import metal_msm_g1, metal_msm_g1_v2
     
     node = ctx["node"]
     points: Buffer = ctx["inputs"][0]
@@ -89,6 +93,8 @@ def _msm_g1(ctx: Dict[str, Any]) -> Dict[str, Any]:
     if c is None or getattr(c, "metal", None) is None:
         raise RuntimeError("metal msm_g1 requires MetalContext")
     rt = c.metal
+    
+    msm_mode = getattr(c.config, "metal_msm_mode", "v1") if c.config else "v1"
 
     # 1. 检查数据类型
     if scalars.dtype != DType.FR:
@@ -104,7 +110,10 @@ def _msm_g1(ctx: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("scalars length exceeds points length")
 
     # 3. 调用 Metal MSM
-    acc = metal_msm_g1(rt, points.data[:num_points], scalars.data.mtl_buffer, num_points)
+    if msm_mode == "v2":
+        acc = metal_msm_g1_v2(rt, points.data[:num_points], scalars.data.mtl_buffer, num_points)
+    else:
+        acc = metal_msm_g1(rt, points.data[:num_points], scalars.data.mtl_buffer, num_points)
     
     # 4. G1 结果通常是一个单独的点，且后续操作 (如 KZG Verification) 通常在 CPU 上
     # 为了简化，我们暂时让它返回在 CPU 上的 G1 结果。
@@ -371,6 +380,123 @@ def _coset_coeffs_from_evals(ctx: Dict[str, Any]) -> Dict[str, Any]:
     out = Buffer(id=out_id, device=Device.METAL, dtype=DType.FR, data=MetalBuffer(dtype="fr_mont_u64x4", n=n, mtl_buffer=out_mtl), meta={"n": n, "omega": omega, "shift": shift})
     return {"outputs": {out_id: out}}
 
+_TWIDDLES_CACHE = {}
+
+def _get_stockham_twiddles(n: int, omega: int, rt: Any) -> Any:
+    key = (n, omega)
+    if key in _TWIDDLES_CACHE:
+        return _TWIDDLES_CACHE[key]
+
+    import array
+    import math
+    p = int(FR_MODULUS)
+    r = pow(2, 256, p)
+    logn = int(math.log2(n))
+
+    flat: list[int] = []
+    for s in range(logn):
+        half_len = 1 << s
+        step = n // (2 * half_len)
+        wlen = pow(int(omega) % p, step, p)
+        w = 1
+        for k in range(half_len):
+            wm = (w * r) % p
+            flat.append(int(wm & ((1 << 64) - 1)))
+            flat.append(int((wm >> 64) & ((1 << 64) - 1)))
+            flat.append(int((wm >> 128) & ((1 << 64) - 1)))
+            flat.append(int((wm >> 192) & ((1 << 64) - 1)))
+            w = (w * wlen) % p
+            
+    arr = array.array("Q", flat)
+    b = arr.tobytes()
+    wlen_buf = rt.device.newBufferWithBytes_length_options_(b, len(b), 0)
+    if wlen_buf is None:
+        raise RuntimeError("failed to allocate wlen buffer")
+    _TWIDDLES_CACHE[key] = wlen_buf
+    return wlen_buf
+
+def _roots_evals_from_coeffs_v2(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    import array
+    import math
+    import Metal  # type: ignore
+    import struct
+
+    node = ctx["node"]
+    inp: Buffer = ctx["inputs"][0]
+    out_id = node.outputs[0]
+    n = int(inp.data.n) if isinstance(inp.data, MetalBuffer) else int(ctx["attrs"].get("n", 0))
+    omega = int(ctx["attrs"]["omega"])
+    c = ctx["context"]
+    rt = c.metal
+
+    if n <= 0 or (n & (n - 1)) != 0:
+        raise ValueError("n must be a power of two")
+    logn = int(math.log2(n))
+
+    p = int(FR_MODULUS)
+    r = pow(2, 256, p)
+
+    wlen_buf = _get_stockham_twiddles(n, omega, rt)
+
+    # Allocate ping-pong buffers
+    buf_a = _alloc_metal(ctx, rt, n * 32)
+    buf_b = _alloc_metal(ctx, rt, n * 32)
+
+    nb = struct.pack("I", int(n))
+    in_size_b = struct.pack("I", int(inp.data.n))
+
+    cmd = rt.queue.commandBuffer()
+
+    # Step 0: Copy & Pad input to buf_a
+    # We use poly_scale_shift with shift=1
+    shift_bytes = array.array("Q", [int(r & ((1 << 64) - 1)), int((r >> 64) & ((1 << 64) - 1)), int((r >> 128) & ((1 << 64) - 1)), int((r >> 192) & ((1 << 64) - 1))]).tobytes()
+    enc0 = cmd.computeCommandEncoder()
+    enc0.setComputePipelineState_(rt.pso_poly_scale_shift_fr_mont)
+    enc0.setBuffer_offset_atIndex_(inp.data.mtl_buffer, 0, 0)
+    enc0.setBuffer_offset_atIndex_(buf_a, 0, 1)
+    enc0.setBytes_length_atIndex_(shift_bytes, len(shift_bytes), 2)
+    enc0.setBytes_length_atIndex_(nb, len(nb), 3)
+    enc0.setBytes_length_atIndex_(in_size_b, len(in_size_b), 4)
+    w0 = int(rt.pso_poly_scale_shift_fr_mont.threadExecutionWidth())
+    if w0 <= 0: w0 = 64
+    tg0 = Metal.MTLSizeMake(w0, 1, 1)
+    grid0 = Metal.MTLSizeMake((n + w0 - 1) // w0 * w0, 1, 1)
+    enc0.dispatchThreads_threadsPerThreadgroup_(grid0, tg0)
+    enc0.endEncoding()
+
+    # Step 1: Stockham Butterfly Operations
+    curr_in = buf_a
+    curr_out = buf_b
+    
+    for s in range(logn):
+        enc1 = cmd.computeCommandEncoder()
+        enc1.setComputePipelineState_(rt.pso_ntt_stockham)
+        enc1.setBuffer_offset_atIndex_(curr_in, 0, 0)
+        enc1.setBuffer_offset_atIndex_(curr_out, 0, 1)
+        enc1.setBuffer_offset_atIndex_(wlen_buf, 0, 2)
+        enc1.setBytes_length_atIndex_(nb, len(nb), 3)
+        sb = struct.pack("I", int(s))
+        enc1.setBytes_length_atIndex_(sb, len(sb), 4)
+        
+        num_threads = n // 2
+        w1 = int(rt.pso_ntt_stockham.threadExecutionWidth())
+        if w1 <= 0: w1 = 64
+        tg1 = Metal.MTLSizeMake(w1, 1, 1)
+        grid1 = Metal.MTLSizeMake((num_threads + w1 - 1) // w1 * w1, 1, 1)
+        enc1.dispatchThreads_threadsPerThreadgroup_(grid1, tg1)
+        enc1.endEncoding()
+        
+        # swap buffers
+        curr_in, curr_out = curr_out, curr_in
+
+    cmd.commit()
+    cmd.waitUntilCompleted()
+
+    # After logn iterations, the result is in curr_in (because we swapped at the end)
+    # The other buffer can be discarded. We just wrap curr_in in MetalBuffer.
+    out = Buffer(id=out_id, device=Device.METAL, dtype=DType.FR, data=MetalBuffer(dtype="fr_mont_u64x4", n=n, mtl_buffer=curr_in), meta={"n": n, "omega": omega})
+    return {"outputs": {out_id: out}}
+
 def _roots_evals_from_coeffs(ctx: Dict[str, Any]) -> Dict[str, Any]:
     import array
     import math
@@ -389,6 +515,11 @@ def _roots_evals_from_coeffs(ctx: Dict[str, Any]) -> Dict[str, Any]:
     c = ctx.get("context")
     if c is None or getattr(c, "metal", None) is None:
         raise RuntimeError("metal roots_evals_from_coeffs requires MetalContext with metal runtime")
+    
+    ntt_mode = getattr(c.config, "metal_ntt_mode", "v1") if c.config else "v1"
+    if ntt_mode == "v2":
+        return _roots_evals_from_coeffs_v2(ctx)
+        
     rt = c.metal
 
     if n <= 0 or (n & (n - 1)) != 0:
@@ -467,6 +598,109 @@ def _roots_evals_from_coeffs(ctx: Dict[str, Any]) -> Dict[str, Any]:
     return {"outputs": {out_id: out}}
 
 
+def _roots_coeffs_from_evals_v2(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    import array
+    import math
+    import Metal  # type: ignore
+    import struct
+
+    node = ctx["node"]
+    inp: Buffer = ctx["inputs"][0]
+    out_id = node.outputs[0]
+    n = int(inp.data.n) if isinstance(inp.data, MetalBuffer) else int(ctx["attrs"].get("n", 0))
+    omega = int(ctx["attrs"]["omega"])
+    c = ctx["context"]
+    rt = c.metal
+
+    if n <= 0 or (n & (n - 1)) != 0:
+        raise ValueError("n must be a power of two")
+    logn = int(math.log2(n))
+
+    p = int(FR_MODULUS)
+    r = pow(2, 256, p)
+    inv_omega = pow(int(omega) % p, -1, p)
+    inv_n = pow(int(n), -1, p)
+    inv_n_m = (inv_n * r) % p
+
+    wlen_buf = _get_stockham_twiddles(n, inv_omega, rt)
+
+    buf_a = _alloc_metal(ctx, rt, n * 32)
+    buf_b = _alloc_metal(ctx, rt, n * 32)
+
+    nb = struct.pack("I", int(n))
+    in_size_b = struct.pack("I", int(inp.data.n))
+    invn = array.array(
+        "Q",
+        [
+            int(inv_n_m & ((1 << 64) - 1)),
+            int((inv_n_m >> 64) & ((1 << 64) - 1)),
+            int((inv_n_m >> 128) & ((1 << 64) - 1)),
+            int((inv_n_m >> 192) & ((1 << 64) - 1)),
+        ],
+    ).tobytes()
+
+    cmd = rt.queue.commandBuffer()
+
+    # Step 0: Copy & Pad
+    shift_bytes = array.array("Q", [int(r & ((1 << 64) - 1)), int((r >> 64) & ((1 << 64) - 1)), int((r >> 128) & ((1 << 64) - 1)), int((r >> 192) & ((1 << 64) - 1))]).tobytes()
+    enc0 = cmd.computeCommandEncoder()
+    enc0.setComputePipelineState_(rt.pso_poly_scale_shift_fr_mont)
+    enc0.setBuffer_offset_atIndex_(inp.data.mtl_buffer, 0, 0)
+    enc0.setBuffer_offset_atIndex_(buf_a, 0, 1)
+    enc0.setBytes_length_atIndex_(shift_bytes, len(shift_bytes), 2)
+    enc0.setBytes_length_atIndex_(nb, len(nb), 3)
+    enc0.setBytes_length_atIndex_(in_size_b, len(in_size_b), 4)
+    w0 = int(rt.pso_poly_scale_shift_fr_mont.threadExecutionWidth())
+    if w0 <= 0: w0 = 64
+    tg0 = Metal.MTLSizeMake(w0, 1, 1)
+    grid0 = Metal.MTLSizeMake((n + w0 - 1) // w0 * w0, 1, 1)
+    enc0.dispatchThreads_threadsPerThreadgroup_(grid0, tg0)
+    enc0.endEncoding()
+
+    # Step 1: Stockham Butterfly Operations
+    curr_in = buf_a
+    curr_out = buf_b
+    
+    for s in range(logn):
+        enc1 = cmd.computeCommandEncoder()
+        enc1.setComputePipelineState_(rt.pso_ntt_stockham)
+        enc1.setBuffer_offset_atIndex_(curr_in, 0, 0)
+        enc1.setBuffer_offset_atIndex_(curr_out, 0, 1)
+        enc1.setBuffer_offset_atIndex_(wlen_buf, 0, 2)
+        enc1.setBytes_length_atIndex_(nb, len(nb), 3)
+        sb = struct.pack("I", int(s))
+        enc1.setBytes_length_atIndex_(sb, len(sb), 4)
+        
+        num_threads = n // 2
+        w1 = int(rt.pso_ntt_stockham.threadExecutionWidth())
+        if w1 <= 0: w1 = 64
+        tg1 = Metal.MTLSizeMake(w1, 1, 1)
+        grid1 = Metal.MTLSizeMake((num_threads + w1 - 1) // w1 * w1, 1, 1)
+        enc1.dispatchThreads_threadsPerThreadgroup_(grid1, tg1)
+        enc1.endEncoding()
+        
+        curr_in, curr_out = curr_out, curr_in
+
+    # Step 2: Multiply by inv_n
+    enc3 = cmd.computeCommandEncoder()
+    enc3.setComputePipelineState_(rt.pso_intt_mul_inv_n)
+    enc3.setBuffer_offset_atIndex_(curr_in, 0, 0)
+    enc3.setBytes_length_atIndex_(invn, len(invn), 1)
+    enc3.setBytes_length_atIndex_(nb, len(nb), 2)
+    
+    w3 = int(rt.pso_intt_mul_inv_n.threadExecutionWidth())
+    if w3 <= 0: w3 = 64
+    tg3 = Metal.MTLSizeMake(w3, 1, 1)
+    grid3 = Metal.MTLSizeMake((n + w3 - 1) // w3 * w3, 1, 1)
+    enc3.dispatchThreads_threadsPerThreadgroup_(grid3, tg3)
+    enc3.endEncoding()
+
+    cmd.commit()
+    cmd.waitUntilCompleted()
+
+    out = Buffer(id=out_id, device=Device.METAL, dtype=DType.FR, data=MetalBuffer(dtype="fr_mont_u64x4", n=n, mtl_buffer=curr_in), meta={"n": n, "omega": omega})
+    return {"outputs": {out_id: out}}
+
 def _roots_coeffs_from_evals(ctx: Dict[str, Any]) -> Dict[str, Any]:
     import array
     import math
@@ -485,6 +719,11 @@ def _roots_coeffs_from_evals(ctx: Dict[str, Any]) -> Dict[str, Any]:
     c = ctx.get("context")
     if c is None or getattr(c, "metal", None) is None:
         raise RuntimeError("metal roots_coeffs_from_evals requires MetalContext with metal runtime")
+    
+    ntt_mode = getattr(c.config, "metal_ntt_mode", "v1") if c.config else "v1"
+    if ntt_mode == "v2":
+        return _roots_coeffs_from_evals_v2(ctx)
+
     rt = c.metal
 
     if n <= 0 or (n & (n - 1)) != 0:

@@ -2,7 +2,7 @@ import unittest
 from dataclasses import dataclass
 
 from frontend.api import build_witness, check_r1cs, compile_circuit
-from backend.schemes.groth16 import prove, setup, verify
+from protocols.groth16 import prove, setup, verify
 
 
 BN254_FR_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617

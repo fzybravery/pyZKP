@@ -7,7 +7,7 @@ from runtime.kernels.registry import KernelRegistry
 from runtime.executor import Executor
 from runtime.context import CPUContext, MetalContext
 from runtime.memory import CPUMemoryPool
-from common.crypto.field.fr import FR_MODULUS
+from crypto.field.fr import FR_MODULUS
 from runtime.metal.runtime import metal_available
 
 class TestRuntimeMetalFRPolyMul(unittest.TestCase):
@@ -40,7 +40,7 @@ class TestRuntimeMetalFRPolyMul(unittest.TestCase):
         
         out_metal = g.buffers["c"].data
         
-        from common.crypto.poly.ntt import poly_mul_ntt
+        from crypto.poly.ntt import poly_mul_ntt
         ref_c = poly_mul_ntt(a_data, b_data)
 
         self.assertEqual(len(out_metal), len(ref_c))

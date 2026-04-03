@@ -10,11 +10,11 @@ CPU kernels：将项目内已有的 CPU reference/优化实现封装为 runtime 
 
 from typing import Any, Dict, List, Tuple
 
-from common.crypto.field import FR_MODULUS, fr_batch_inv
-from common.crypto.field.fr import fr_inv
-from common.crypto.ecc.bn254 import G1_ZERO
-from common.crypto.kzg.cpu_ref import SRS
-from common.crypto.msm import (
+from crypto.field import FR_MODULUS, fr_batch_inv
+from crypto.field.fr import fr_inv
+from crypto.ecc.bn254 import G1_ZERO
+from crypto.kzg.cpu_ref import SRS
+from crypto.msm import (
     fixed_base_get_cached,
     fixed_base_precompute,
     msm_fixed_base,
@@ -25,7 +25,7 @@ from common.crypto.msm import (
     msm_pippenger_batch,
     msm_pippenger_g2,
 )
-from common.crypto.poly import (
+from crypto.poly import (
     coeffs_from_evals_on_coset,
     coeffs_from_evals_on_roots,
     evals_from_coeffs_on_coset,
@@ -36,7 +36,7 @@ from common.crypto.poly import (
     poly_eval,
     poly_mul_ntt,
 )
-from common.crypto.poly.cpu_ref import poly_sub
+from crypto.poly.cpu_ref import poly_sub
 from runtime.ir.ops import OpType
 from runtime.ir.types import Backend, Buffer, Device, DType
 from runtime.memory import CPUMemoryPool

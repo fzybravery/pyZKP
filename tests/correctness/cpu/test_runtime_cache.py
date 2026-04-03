@@ -1,8 +1,8 @@
 import unittest
 
-from common.crypto.field.fr import FR_MODULUS
+from crypto.field.fr import FR_MODULUS
 from runtime.cache import circuit_ir_fingerprint
-from runtime.bench import RepeatMulCircuit
+from benches.bench import RepeatMulCircuit
 from frontend.api import compile_circuit
 
 

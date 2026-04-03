@@ -293,7 +293,19 @@ inline G1Point g1_add_jac(G1Point p, G1Point q) {
 }
 
 // -----------------------------------------------------------------------------
-// Pippenger MSM Phase 1: Bucket 累加
+// G1 点取负 (Jacobian 坐标)
+// -----------------------------------------------------------------------------
+inline G1Point g1_neg_jac(G1Point p) {
+    // 零点特判：如果 Z 为 0，则还是零点
+    if ((p.z.v0 | p.z.v1 | p.z.v2 | p.z.v3) == 0) return p;
+    // y = MODULUS - y
+    Fq zero; zero.v0 = 0; zero.v1 = 0; zero.v2 = 0; zero.v3 = 0;
+    p.y = sub_mod2_fq(zero, p.y);
+    return p;
+}
+
+// -----------------------------------------------------------------------------
+// Pippenger MSM Phase 1: Bucket 累加 (Baseline V1)
 // -----------------------------------------------------------------------------
 
 // points: [N] 预先上传到显存的基点
@@ -404,6 +416,146 @@ kernel void msm_bucket_reduce(
     window_sum.z.v0 = 0; window_sum.z.v1 = 0; window_sum.z.v2 = 0; window_sum.z.v3 = 0;
     
     // 倒序遍历 bucket
+    for (int d = buckets_per_window - 1; d > 0; d--) {
+        G1Point b = buckets[offset + d];
+        running_sum = g1_add_jac(running_sum, b);
+        window_sum = g1_add_jac(window_sum, running_sum);
+    }
+    
+    window_sums[gid] = window_sum;
+}
+
+// -----------------------------------------------------------------------------
+// Pippenger MSM Phase 1: Bucket 累加 (V2: Signed-Digit + CSR 优化)
+// -----------------------------------------------------------------------------
+
+#include <metal_stdlib>
+#include <metal_atomic>
+using namespace metal;
+
+// CSR Step 1: Histogram - 统计每个桶包含多少个点
+kernel void msm_csr_histogram(
+    const device int* signed_scalars [[buffer(0)]],
+    device atomic_uint* bucket_offsets [[buffer(1)]],
+    constant uint& num_points [[buffer(2)]],
+    constant uint& window_count [[buffer(3)]],
+    constant uint& buckets_per_window [[buffer(4)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= num_points) return;
+    for (uint w = 0; w < window_count; w++) {
+        int val = signed_scalars[gid * window_count + w];
+        if (val != 0) {
+            uint bucket_idx = abs(val);
+            uint global_bucket_idx = w * buckets_per_window + bucket_idx;
+            atomic_fetch_add_explicit(&bucket_offsets[global_bucket_idx], 1, memory_order_relaxed);
+        }
+    }
+}
+
+// CSR Step 2: Prefix Sum - 将统计转换为连续偏移量 (Row Pointers)
+kernel void msm_csr_prefix_sum(
+    device atomic_uint* bucket_offsets [[buffer(0)]],
+    device uint* row_pointers [[buffer(1)]],
+    constant uint& total_buckets [[buffer(2)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid > 0) return; // 单线程执行 (对于 < 1M 数组极快)
+    uint sum = 0;
+    for (uint i = 0; i < total_buckets; i++) {
+        uint count = atomic_load_explicit(&bucket_offsets[i], memory_order_relaxed);
+        row_pointers[i] = sum;
+        atomic_store_explicit(&bucket_offsets[i], sum, memory_order_relaxed); // 同时重置 offsets 用于后续 scatter
+        sum += count;
+    }
+    row_pointers[total_buckets] = sum;
+}
+
+// CSR Step 3: Scatter - 按照偏移量散布点索引和符号
+kernel void msm_csr_scatter(
+    const device int* signed_scalars [[buffer(0)]],
+    device atomic_uint* bucket_offsets [[buffer(1)]],
+    device uint* sorted_point_indices [[buffer(2)]], // 最高位存符号 (1=负)，低 31 位存索引
+    constant uint& num_points [[buffer(3)]],
+    constant uint& window_count [[buffer(4)]],
+    constant uint& buckets_per_window [[buffer(5)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= num_points) return;
+    for (uint w = 0; w < window_count; w++) {
+        int val = signed_scalars[gid * window_count + w];
+        if (val != 0) {
+            uint bucket_idx = abs(val);
+            uint global_bucket_idx = w * buckets_per_window + bucket_idx;
+            uint offset = atomic_fetch_add_explicit(&bucket_offsets[global_bucket_idx], 1, memory_order_relaxed);
+            
+            uint sign_bit = (val < 0) ? (1u << 31) : 0;
+            sorted_point_indices[offset] = sign_bit | gid;
+        }
+    }
+}
+
+// CSR Step 4: Accumulate - 按连续的 CSR 数据段进行 O(N) 桶聚合
+kernel void msm_bucket_accumulate_v2(
+    const device G1Point* points [[buffer(0)]],
+    const device uint* sorted_point_indices [[buffer(1)]],
+    const device uint* row_pointers [[buffer(2)]],
+    device G1Point* buckets [[buffer(3)]],
+    constant uint& window_count [[buffer(4)]],
+    constant uint& buckets_per_window [[buffer(5)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    uint total_buckets = window_count * buckets_per_window;
+    if (gid >= total_buckets) return;
+    
+    uint bucket_idx = gid % buckets_per_window;
+    if (bucket_idx == 0) return; 
+    
+    uint start = row_pointers[gid];
+    uint end = row_pointers[gid + 1];
+    
+    G1Point acc;
+    acc.x.v0 = 0; acc.x.v1 = 0; acc.x.v2 = 0; acc.x.v3 = 0;
+    acc.y.v0 = 0; acc.y.v1 = 0; acc.y.v2 = 0; acc.y.v3 = 0;
+    acc.z.v0 = 0; acc.z.v1 = 0; acc.z.v2 = 0; acc.z.v3 = 0;
+    
+    for (uint i = start; i < end; i++) {
+        uint packed = sorted_point_indices[i];
+        uint pt_idx = packed & 0x7FFFFFFF;
+        bool is_neg = (packed >> 31) != 0;
+        
+        G1Point p = points[pt_idx];
+        if (is_neg) {
+            p = g1_neg_jac(p);
+        }
+        acc = g1_add_jac(acc, p);
+    }
+    
+    buckets[gid] = acc;
+}
+
+// -----------------------------------------------------------------------------
+// Pippenger MSM Phase 2: Window 内 Bucket 聚合 (V2)
+// -----------------------------------------------------------------------------
+kernel void msm_bucket_reduce_v2(
+    const device G1Point* buckets [[buffer(0)]],
+    device G1Point* window_sums [[buffer(1)]],
+    constant uint& window_bits [[buffer(2)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    uint buckets_per_window = (1 << (window_bits - 1)) + 1;
+    uint offset = gid * buckets_per_window;
+    
+    G1Point running_sum;
+    running_sum.x.v0 = 0; running_sum.x.v1 = 0; running_sum.x.v2 = 0; running_sum.x.v3 = 0;
+    running_sum.y.v0 = 0; running_sum.y.v1 = 0; running_sum.y.v2 = 0; running_sum.y.v3 = 0;
+    running_sum.z.v0 = 0; running_sum.z.v1 = 0; running_sum.z.v2 = 0; running_sum.z.v3 = 0;
+    
+    G1Point window_sum;
+    window_sum.x.v0 = 0; window_sum.x.v1 = 0; window_sum.x.v2 = 0; window_sum.x.v3 = 0;
+    window_sum.y.v0 = 0; window_sum.y.v1 = 0; window_sum.y.v2 = 0; window_sum.y.v3 = 0;
+    window_sum.z.v0 = 0; window_sum.z.v1 = 0; window_sum.z.v2 = 0; window_sum.z.v3 = 0;
+    
     for (int d = buckets_per_window - 1; d > 0; d--) {
         G1Point b = buckets[offset + d];
         running_sum = g1_add_jac(running_sum, b);

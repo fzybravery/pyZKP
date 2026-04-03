@@ -2,7 +2,7 @@ import unittest
 from dataclasses import dataclass
 
 from frontend.api import build_witness, check_r1cs, compile_circuit
-from common.ir.core import LinExpr, VarRef, Visibility
+from frontend.ir.core import LinExpr, VarRef, Visibility
 from frontend.circuit.schema import public, secret
 
 
