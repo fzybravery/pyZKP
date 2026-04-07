@@ -112,7 +112,7 @@ def _to_device(ctx: Dict[str, Any]) -> Dict[str, Any]:
 
     host = inp.data
     n = len(host)
-    out_len = n * 32
+    out_len = max(n * 32, 32)
     
     pool = ctx.get("pool")
     if pool is not None and hasattr(pool, "alloc_metal"):
@@ -306,6 +306,15 @@ def _poly_sub(ctx: Dict[str, Any]) -> Dict[str, Any]:
     b: Buffer = ctx["inputs"][1]
     out_id = node.outputs[0]
     out = poly_sub(a.data, b.data)
+    
+    # 截断或恢复长度
+    n = ctx["attrs"].get("n")
+    if n is not None:
+        if len(out) > n:
+            out = out[:n]
+        elif len(out) < n:
+            out = out + [0] * (n - len(out))
+            
     return {"outputs": {out_id: Buffer(id=out_id, device=a.device, dtype=DType.FR, data=out)}}
 
 

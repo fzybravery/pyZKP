@@ -15,7 +15,11 @@ runtime bench（最小可复现基准）。
 import argparse
 import os
 import json
+import sys
 import time
+
+# 强制将项目根目录加入到模块搜索路径（解决 Trae 调试器找不到包的问题）
+sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
 from frontend.api import build_witness, check_r1cs, compile_circuit
 from protocols.groth16.prove import prove as groth16_prove, prove_batch as groth16_prove_batch

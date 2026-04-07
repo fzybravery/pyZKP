@@ -16,6 +16,7 @@ def register_metal_kernels(registry: KernelRegistry) -> None:
     registry.register(OpType.ROOTS_COEFFS_FROM_EVALS, Device.METAL, _roots_coeffs_from_evals, backend=Backend.METAL) # 256-bit 域元素的系数计算
     registry.register(OpType.COSET_EVALS_FROM_COEFFS, Device.METAL, _coset_evals_from_coeffs, backend=Backend.METAL)
     registry.register(OpType.COSET_COEFFS_FROM_EVALS, Device.METAL, _coset_coeffs_from_evals, backend=Backend.METAL)
+    registry.register(OpType.POLY_MUL_NTT, Device.METAL, _poly_mul_ntt, backend=Backend.METAL)
     registry.register(OpType.MSM_G1, Device.METAL, _msm_g1, backend=Backend.METAL)
     registry.register(OpType.KZG_BATCH_COMMIT, Device.METAL, _kzg_batch_commit, backend=Backend.METAL)
 
@@ -124,21 +125,24 @@ def _poly_sub(ctx: Dict[str, Any]) -> Dict[str, Any]:
     import struct
 
     node = ctx["node"]
-    a: Buffer = ctx["inputs"][0]
-    b: Buffer = ctx["inputs"][1]
+    ab: Buffer = ctx["inputs"][0]
+    c_raw: Buffer = ctx["inputs"][1]
+    
+    n_ab = int(ab.data.n)
+    n_c = int(c_raw.data.n)
+    
     out_id = node.outputs[0]
-    if a.dtype != DType.FR or b.dtype != DType.FR:
+    if ab.dtype != DType.FR or c_raw.dtype != DType.FR:
         raise ValueError("metal poly_sub supports FR only")
-    if not isinstance(a.data, MetalBuffer) or not isinstance(b.data, MetalBuffer):
-        raise ValueError("metal poly_sub expects MetalBuffer")
-    if len(a.data) != len(b.data):
-        raise ValueError("length mismatch")
     c = ctx.get("context")
     if c is None or getattr(c, "metal", None) is None:
         raise RuntimeError("metal poly_sub requires MetalContext with metal runtime")
+    if not isinstance(ab.data, MetalBuffer) or not isinstance(c_raw.data, MetalBuffer):
+        raise ValueError("metal poly_sub expects MetalBuffer")
+        
     rt = c.metal
 
-    n = int(a.data.n)
+    n = n_ab
     out_len = n * 32
     out_mtl = _alloc_metal(ctx, rt, out_len)
     if out_mtl is None:
@@ -147,11 +151,13 @@ def _poly_sub(ctx: Dict[str, Any]) -> Dict[str, Any]:
     cmd = rt.queue.commandBuffer()
     enc = cmd.computeCommandEncoder()
     enc.setComputePipelineState_(rt.pso_poly_sub_fr_mont)
-    enc.setBuffer_offset_atIndex_(a.data.mtl_buffer, 0, 0)
-    enc.setBuffer_offset_atIndex_(b.data.mtl_buffer, 0, 1)
+    enc.setBuffer_offset_atIndex_(ab.data.mtl_buffer, 0, 0)
+    enc.setBuffer_offset_atIndex_(c_raw.data.mtl_buffer, 0, 1)
     enc.setBuffer_offset_atIndex_(out_mtl, 0, 2)
     nb = struct.pack("I", int(n))
     enc.setBytes_length_atIndex_(nb, len(nb), 3)
+    nb_b = struct.pack("I", int(n_c))
+    enc.setBytes_length_atIndex_(nb_b, len(nb_b), 4)
 
     w = int(rt.pso_poly_sub_fr_mont.threadExecutionWidth())
     if w <= 0:
@@ -161,6 +167,7 @@ def _poly_sub(ctx: Dict[str, Any]) -> Dict[str, Any]:
     enc.dispatchThreads_threadsPerThreadgroup_(grid, tg)
     enc.endEncoding()
     cmd.commit()
+    # 异步非阻塞执行
     cmd.waitUntilCompleted()
 
     out = Buffer(id=out_id, device=Device.METAL, dtype=DType.FR, data=MetalBuffer(dtype="fr_mont_u64x4", n=n, mtl_buffer=out_mtl), meta={"n": n})
@@ -216,10 +223,73 @@ def _pointwise_mul(ctx: Dict[str, Any]) -> Dict[str, Any]:
     enc.dispatchThreads_threadsPerThreadgroup_(grid, tg)
     enc.endEncoding()
     cmd.commit()
+    # 异步非阻塞执行
     cmd.waitUntilCompleted()
 
     out = Buffer(id=out_id, device=Device.METAL, dtype=DType.FR, data=MetalBuffer(dtype="fr_mont_u64x4", n=n, mtl_buffer=out_mtl), meta={"n": n})
     return {"outputs": {out_id: out}}
+
+
+def _poly_mul_ntt(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    from crypto.poly.ntt import omega_for_size
+    node = ctx["node"]
+    a: Buffer = ctx["inputs"][0]
+    b: Buffer = ctx["inputs"][1]
+    out_id = node.outputs[0]
+    
+    len_a = int(a.data.n) if isinstance(a.data, MetalBuffer) else len(a.data)
+    len_b = int(b.data.n) if isinstance(b.data, MetalBuffer) else len(b.data)
+    
+    if len_a == 0 or len_b == 0:
+        return {"outputs": {out_id: Buffer(id=out_id, device=Device.METAL, dtype=DType.FR, data=MetalBuffer(dtype="fr_mont_u64x4", n=0, mtl_buffer=None))}}
+        
+    need = len_a + len_b - 1
+    n = 1 << (need - 1).bit_length()
+    omega = omega_for_size(n)
+    
+    class DummyNode:
+        def __init__(self, outs):
+            self.outputs = outs
+            
+    # 1. a_eval
+    ctx_a = dict(ctx)
+    ctx_a["inputs"] = [a]
+    ctx_a["attrs"] = {"n": n, "omega": omega}
+    ctx_a["node"] = DummyNode(["dummy_a"])
+    ctx_a["context"] = ctx.get("context")
+    res_a = _roots_evals_from_coeffs(ctx_a)
+    buf_a = res_a["outputs"]["dummy_a"]
+    
+    # 2. b_eval
+    ctx_b = dict(ctx)
+    ctx_b["inputs"] = [b]
+    ctx_b["attrs"] = {"n": n, "omega": omega}
+    ctx_b["node"] = DummyNode(["dummy_b"])
+    ctx_b["context"] = ctx.get("context")
+    res_b = _roots_evals_from_coeffs(ctx_b)
+    buf_b = res_b["outputs"]["dummy_b"]
+    
+    # 3. c_eval = a_eval * b_eval
+    ctx_mul = dict(ctx)
+    ctx_mul["inputs"] = [buf_a, buf_b]
+    ctx_mul["node"] = DummyNode(["dummy_c"])
+    res_mul = _pointwise_mul(ctx_mul)
+    buf_c = res_mul["outputs"]["dummy_c"]
+    
+    # 4. c_coeff = INTT(c_eval)
+    ctx_intt = dict(ctx)
+    ctx_intt["inputs"] = [buf_c]
+    ctx_intt["attrs"] = {"n": n, "omega": omega}
+    ctx_intt["node"] = DummyNode([out_id])
+    ctx_intt["context"] = ctx.get("context")
+    res_intt = _roots_coeffs_from_evals(ctx_intt)
+    
+    out_buf = res_intt["outputs"][out_id]
+    
+    # 对于多项式减法等后续操作，可能要求两个多项式的底层数组长度（而不是有效 meta 长度）相同
+    # 我们先不要手动修改 data.n，保持它为 2 的幂（为了兼容后续算子）
+    out_buf.meta["n"] = need
+    return {"outputs": {out_id: out_buf}}
 
 
 def _coset_evals_from_coeffs(ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -313,7 +383,7 @@ def _coset_coeffs_from_evals(ctx: Dict[str, Any]) -> Dict[str, Any]:
     inp: Buffer = ctx["inputs"][0]
     out_id = node.outputs[0]
     
-    n = int(inp.data.n) if isinstance(inp.data, MetalBuffer) else int(ctx["attrs"].get("n", 0))
+    n = int(ctx["attrs"].get("n", inp.data.n if isinstance(inp.data, MetalBuffer) else 0))
     in_size = n
     
     omega = int(ctx["attrs"]["omega"])
@@ -424,7 +494,7 @@ def _roots_evals_from_coeffs_v2(ctx: Dict[str, Any]) -> Dict[str, Any]:
     node = ctx["node"]
     inp: Buffer = ctx["inputs"][0]
     out_id = node.outputs[0]
-    n = int(inp.data.n) if isinstance(inp.data, MetalBuffer) else int(ctx["attrs"].get("n", 0))
+    n = int(ctx["attrs"].get("n", inp.data.n if isinstance(inp.data, MetalBuffer) else 0))
     omega = int(ctx["attrs"]["omega"])
     c = ctx["context"]
     rt = c.metal
@@ -506,7 +576,7 @@ def _roots_evals_from_coeffs(ctx: Dict[str, Any]) -> Dict[str, Any]:
     node = ctx["node"]
     inp: Buffer = ctx["inputs"][0]
     out_id = node.outputs[0]
-    n = int(inp.data.n) if isinstance(inp.data, MetalBuffer) else int(ctx["attrs"].get("n", 0))
+    n = int(ctx["attrs"].get("n", inp.data.n if isinstance(inp.data, MetalBuffer) else 0))
     omega = int(ctx["attrs"]["omega"])
     if inp.dtype != DType.FR:
         raise ValueError("metal roots_evals_from_coeffs supports FR only")
@@ -607,7 +677,7 @@ def _roots_coeffs_from_evals_v2(ctx: Dict[str, Any]) -> Dict[str, Any]:
     node = ctx["node"]
     inp: Buffer = ctx["inputs"][0]
     out_id = node.outputs[0]
-    n = int(inp.data.n) if isinstance(inp.data, MetalBuffer) else int(ctx["attrs"].get("n", 0))
+    n = int(ctx["attrs"].get("n", inp.data.n if isinstance(inp.data, MetalBuffer) else 0))
     omega = int(ctx["attrs"]["omega"])
     c = ctx["context"]
     rt = c.metal
@@ -710,7 +780,7 @@ def _roots_coeffs_from_evals(ctx: Dict[str, Any]) -> Dict[str, Any]:
     node = ctx["node"]
     inp: Buffer = ctx["inputs"][0]
     out_id = node.outputs[0]
-    n = int(inp.data.n) if isinstance(inp.data, MetalBuffer) else int(ctx["attrs"].get("n", 0))
+    n = int(ctx["attrs"].get("n", inp.data.n if isinstance(inp.data, MetalBuffer) else 0))
     omega = int(ctx["attrs"]["omega"])
     if inp.dtype != DType.FR:
         raise ValueError("metal roots_coeffs_from_evals supports FR only")

@@ -14,6 +14,7 @@ from crypto.poly import (
     poly_vanishing_from_roots,
     lagrange_interpolate,
 )
+from crypto.poly.ntt import omega_for_size
 from runtime import Executor, KernelRegistry
 from runtime.config import RuntimeConfig
 from runtime.ir import Device, DType, Graph, OpType
@@ -80,21 +81,39 @@ def compute_h_from_abc_on_roots(
     g.add_buffer(id="a_eval", device=Device.CPU, dtype=DType.FR, data=list(a_eval))
     g.add_buffer(id="b_eval", device=Device.CPU, dtype=DType.FR, data=list(b_eval))
     g.add_buffer(id="c_eval", device=Device.CPU, dtype=DType.FR, data=list(c_eval))
-
     g.add_node(op=OpType.ROOTS_COEFFS_FROM_EVALS, inputs=["a_eval"], outputs=["a_coeff"], attrs={"omega": omega})
     g.add_node(op=OpType.ROOTS_COEFFS_FROM_EVALS, inputs=["b_eval"], outputs=["b_coeff"], attrs={"omega": omega})
-    g.add_node(op=OpType.ROOTS_COEFFS_FROM_EVALS, inputs=["c_eval"], outputs=["c_coeff"], attrs={"omega": omega})
+    g.add_node(op=OpType.ROOTS_COEFFS_FROM_EVALS, inputs=["c_eval"], outputs=["c_coeff_raw"], attrs={"omega": omega})
     g.add_node(op=OpType.POLY_MUL_NTT, inputs=["a_coeff", "b_coeff"], outputs=["ab_coeff"])
-    g.add_node(op=OpType.POLY_SUB, inputs=["ab_coeff", "c_coeff"], outputs=["p_coeff"])
+    
+    # 获取乘法结果的目标长度
+    n_ab = 1 << (2 * n - 2).bit_length()
+    
+    g.add_node(op=OpType.POLY_SUB, inputs=["ab_coeff", "c_coeff_raw"], outputs=["p_coeff"], attrs={"n": n_ab})
+    
+    # 截断或还原多项式长度，确保除法可以正确执行
+    # 在 CPU 上，div_xn_minus_1 需要输入多项式的长度兼容
+    # 为了保证逻辑的纯净性，我们在 qap.py 这层只保留纯净图
     g.add_node(op=OpType.DIV_XN_MINUS_1, inputs=["p_coeff"], outputs=["h_coeff", "rem"], attrs={"n": n})
 
     ctx0 = runtime_config.make_context(pool=runtime_pool, context=runtime_context) if runtime_config is not None else runtime_context
-    exe.run(g, pool=runtime_pool, trace=runtime_trace, keep=["a_coeff", "b_coeff", "c_coeff", "h_coeff", "rem"], context=ctx0)
-    a_poly = list(g.buffers["a_coeff"].data)
-    b_poly = list(g.buffers["b_coeff"].data)
-    c_poly = list(g.buffers["c_coeff"].data)
-    h_poly = list(g.buffers["h_coeff"].data)
-    rem = list(g.buffers["rem"].data)
+    if ctx0 is None:
+        from runtime.context import CPUContext
+        ctx0 = CPUContext(backend=backend0, pool=runtime_pool)
+        
+    # 我们需要从 Device 获取数据
+    g.add_node(op=OpType.FROM_DEVICE, inputs=["a_coeff"], outputs=["a_coeff_cpu"])
+    g.add_node(op=OpType.FROM_DEVICE, inputs=["b_coeff"], outputs=["b_coeff_cpu"])
+    g.add_node(op=OpType.FROM_DEVICE, inputs=["c_coeff_raw"], outputs=["c_coeff_cpu"])
+    g.add_node(op=OpType.FROM_DEVICE, inputs=["h_coeff"], outputs=["h_coeff_cpu"])
+    g.add_node(op=OpType.FROM_DEVICE, inputs=["rem"], outputs=["rem_cpu"])
+
+    exe.run(g, pool=runtime_pool, trace=runtime_trace, keep=["a_coeff_cpu", "b_coeff_cpu", "c_coeff_cpu", "h_coeff_cpu", "rem_cpu"], backend=backend0, context=ctx0)
+    a_poly = list(g.buffers["a_coeff_cpu"].data)
+    b_poly = list(g.buffers["b_coeff_cpu"].data)
+    c_poly = list(g.buffers["c_coeff_cpu"].data)
+    h_poly = list(g.buffers["h_coeff_cpu"].data)
+    rem = list(g.buffers["rem_cpu"].data)
     if len(rem) != 0:
         raise ValueError("witness does not satisfy R1CS (non-zero remainder)")
     t_poly = [(-1) % FR_MODULUS] + [0] * (n - 1) + [1]

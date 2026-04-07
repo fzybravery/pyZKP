@@ -95,7 +95,7 @@ def prove(
 
     a_eval, b_eval, c_eval = eval_r1cs_vectors(r1cs, w)
     omega = omega_for_size(n)
-    qap = compute_h_from_abc_on_roots(n, omega, a_eval, b_eval, c_eval, runtime_trace=runtime_trace, runtime_pool=runtime_pool)
+    qap = compute_h_from_abc_on_roots(n, omega, a_eval, b_eval, c_eval, runtime_trace=runtime_trace, runtime_pool=runtime_pool, runtime_context=ctx0, runtime_config=runtime_config)
     h_coeffs = list(qap.h_poly)
     if len(h_coeffs) < n - 1:
         h_coeffs = h_coeffs + [0] * (n - 1 - len(h_coeffs))

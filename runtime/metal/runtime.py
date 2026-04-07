@@ -217,10 +217,15 @@ kernel void poly_sub_fr_mont(
     const device Fr* b [[buffer(1)]],
     device Fr* out [[buffer(2)]],
     constant uint& n [[buffer(3)]],
+    constant uint& n_b [[buffer(4)]],
     uint gid [[thread_position_in_grid]]
 ) {
     if (gid >= n) return;
-    out[gid] = sub_mod2(a[gid], b[gid]);
+    if (gid < n_b) {
+        out[gid] = sub_mod2(a[gid], b[gid]);
+    } else {
+        out[gid] = a[gid];
+    }
 }
 
 kernel void poly_scale_shift_fr_mont(

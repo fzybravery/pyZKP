@@ -126,6 +126,14 @@ class Trace:
             "name": "process_name", "ph": "M", "pid": pid_map["METAL"],
             "args": {"name": "Metal Backend"}
         })
+        events.append({
+            "name": "thread_name", "ph": "M", "pid": pid_map["METAL"], "tid": 1,
+            "args": {"name": "CPU Task"}
+        })
+        events.append({
+            "name": "thread_name", "ph": "M", "pid": pid_map["METAL"], "tid": 2,
+            "args": {"name": "Metal Kernel"}
+        })
 
         for trace in self.events:
             # Chrome Tracing 时间单位是微秒 (microseconds)
@@ -134,7 +142,10 @@ class Trace:
             
             # 使用大写后端名称获取对应的 PID，如果没有找到默认用 CPU
             backend_str = str(trace.backend).split('.')[-1].upper()
+            device_str = str(trace.device).split('.')[-1].upper()
+            
             pid = pid_map.get(backend_str, 1)
+            tid = 1 if device_str == "CPU" else 2
             
             event = {
                 "name": str(trace.op.value),
@@ -143,7 +154,7 @@ class Trace:
                 "ts": start_us,
                 "dur": dur_us,
                 "pid": pid,
-                "tid": 1,   # 统一在主线程显示
+                "tid": tid,   # 根据 device 分配不同 tid
                 "args": {
                     "backend": str(trace.backend),
                     "device": str(trace.device),
